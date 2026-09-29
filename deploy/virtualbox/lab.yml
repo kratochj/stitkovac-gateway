@@ -1,0 +1,209 @@
+---
+# This maintenance upgrade is separate from the signed gateway-agent OTA channel.
+- name: Upgrade the VirtualBox lab helper while preserving gateway releases and credentials
+  hosts: gateways
+  become: true
+  gather_facts: true
+  vars:
+    ansible_remote_tmp: /tmp
+  tasks:
+    - name: Require an explicit ARM64 lab release
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - ansible_facts.system == 'Linux'
+          - ansible_facts.architecture == 'aarch64'
+          - gateway_lab_binary is defined
+          - gateway_lab_version is defined
+          - gateway_lab_sha256 is defined
+          - gateway_lab_sha256 is match('^[a-f0-9]{64}$')
+
+    - name: Verify the appliance storage guard
+      ansible.builtin.command: /usr/lib/stitkovac-gateway/check-storage
+      changed_when: false
+
+    - name: Require the isolated lab services
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ item }}"]
+      loop: [gateway-lab-network, gateway-lab-cloud, gateway-lab-printer, stitkovac-gateway]
+      changed_when: false
+
+    - name: Require idle printing before maintenance
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import sqlite3
+            db = sqlite3.connect('file:/data/gateway/gateway.db?mode=ro', uri=True)
+            assert db.execute("SELECT count(*) FROM attempts WHERE state IN ('CLAIMED','SENDING')").fetchone()[0] == 0, 'Printing is active'
+      changed_when: false
+
+    - name: Record private cloud configuration checksum
+      ansible.builtin.stat:
+        path: /data/gateway/cloud.json
+        checksum_algorithm: sha256
+      register: cloud_before
+      no_log: true
+
+    - name: Refuse maintenance during an agent OTA transition
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import json
+            from pathlib import Path
+            selection = Path('/data/gateway-releases/selection.json')
+            if selection.exists():
+                state = json.loads(selection.read_text())
+                assert not state.get('pending') and not state.get('trial'), 'Agent OTA is pending'
+            journal = Path('/data/gateway/ota-command.json')
+            if journal.exists():
+                state = json.loads(journal.read_text())['report']['state']
+                assert state in ('SUCCEEDED','ROLLED_BACK','FAILED','CANCELLED','EXPIRED'), 'Agent OTA is active'
+      changed_when: false
+
+    - name: Record agent release selection checksum
+      ansible.builtin.stat:
+        path: /data/gateway-releases/selection.json
+        checksum_algorithm: sha256
+      register: selection_before
+
+    - name: Create a private executable staging directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /data
+        prefix: gateway-lab-upgrade.
+      register: lab_stage
+
+    - name: Verify and install the lab helper
+      block:
+        - name: Stage the new helper without touching active services
+          ansible.builtin.copy:
+            src: "{{ gateway_lab_binary }}"
+            dest: "{{ lab_stage.path }}/gateway-lab"
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: Calculate the staged artifact checksum
+          ansible.builtin.stat:
+            path: "{{ lab_stage.path }}/gateway-lab"
+            checksum_algorithm: sha256
+          register: lab_artifact
+
+        - name: Require the prepared artifact
+          ansible.builtin.assert:
+            that: lab_artifact.stat.checksum == gateway_lab_sha256
+
+        - name: Verify the lab build version
+          ansible.builtin.command:
+            argv: ["{{ lab_stage.path }}/gateway-lab", --version]
+          register: lab_version
+          changed_when: false
+          failed_when: lab_version.rc != 0 or lab_version.stdout | trim != gateway_lab_version
+
+        - name: Save the previous helper for installation recovery
+          ansible.builtin.copy:
+            src: /usr/lib/stitkovac-gateway/gateway-lab
+            dest: "{{ lab_stage.path }}/previous"
+            remote_src: true
+            mode: '0700'
+
+        - name: Replace the helper during a bounded maintenance stop
+          block:
+            - name: Stop the agent and both users of the helper binary
+              ansible.builtin.systemd_service:
+                name: "{{ item }}"
+                state: stopped
+              loop: [stitkovac-gateway, gateway-lab-cloud, gateway-lab-printer]
+
+            - name: Temporarily allow system installation
+              ansible.builtin.command:
+                argv: [mount, -o, 'remount,rw', /]
+              changed_when: true
+              register: lab_writable
+
+            - name: Install the verified helper
+              ansible.builtin.copy:
+                src: "{{ lab_stage.path }}/gateway-lab"
+                dest: /usr/lib/stitkovac-gateway/gateway-lab
+                remote_src: true
+                owner: root
+                group: root
+                mode: '0755'
+          rescue:
+            - name: Restore the previous executable if installation failed
+              ansible.builtin.copy:
+                src: "{{ lab_stage.path }}/previous"
+                dest: /usr/lib/stitkovac-gateway/gateway-lab
+                remote_src: true
+                owner: root
+                group: root
+                mode: '0755'
+              when: lab_writable is defined and lab_writable.rc | default(1) == 0
+
+            - name: Report the failed installation
+              ansible.builtin.fail:
+                msg: Lab installation failed; the previous helper was retained or restored.
+          always:
+            - name: Flush installation changes
+              ansible.builtin.command: sync
+              changed_when: false
+
+            - name: Restore read-only root
+              ansible.builtin.command:
+                argv: [mount, -o, 'remount,ro', /]
+              changed_when: true
+
+            - name: Verify protected storage before restarting services
+              ansible.builtin.command: /usr/lib/stitkovac-gateway/check-storage
+              changed_when: false
+
+            - name: Resume lab services and the existing gateway release
+              ansible.builtin.systemd_service:
+                name: "{{ item }}"
+                state: started
+              loop: [gateway-lab-cloud, gateway-lab-printer, stitkovac-gateway]
+      always:
+        - name: Remove temporary helper copies
+          ansible.builtin.file:
+            path: "{{ lab_stage.path }}"
+            state: absent
+
+    - name: Wait for the protected lab console
+      ansible.builtin.uri:
+        url: https://127.0.0.1:9443/
+        validate_certs: false
+        status_code: 401
+      register: lab_health
+      until: lab_health.status | default(0) == 401
+      retries: 15
+      delay: 2
+
+    - name: Verify unchanged cloud configuration
+      ansible.builtin.stat:
+        path: /data/gateway/cloud.json
+        checksum_algorithm: sha256
+      register: cloud_after
+      no_log: true
+
+    - name: Require preserved cloud credentials
+      ansible.builtin.assert:
+        that:
+          - cloud_before.stat.exists == cloud_after.stat.exists
+          - cloud_before.stat.checksum | default('') == cloud_after.stat.checksum | default('')
+      no_log: true
+
+    - name: Verify unchanged gateway release selection
+      ansible.builtin.stat:
+        path: /data/gateway-releases/selection.json
+        checksum_algorithm: sha256
+      register: selection_after
+
+    - name: Require preserved agent release selection
+      ansible.builtin.assert:
+        that:
+          - selection_before.stat.exists == selection_after.stat.exists
+          - selection_before.stat.checksum | default('') == selection_after.stat.checksum | default('')

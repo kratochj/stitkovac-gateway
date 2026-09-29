@@ -17,18 +17,18 @@ type captureView struct {
 }
 
 type dashboard struct {
-	Lease         Lease
-	Files         []captureView
-	Jobs          []Job
-	Online        bool
-	CaptureError  bool
-	Gateway, CSRF string
+	Lease                  Lease
+	Files                  []captureView
+	Jobs                   []Job
+	Online                 bool
+	CaptureError           bool
+	Gateway, CSRF, Version string
 }
 
 func (s *Server) snapshot() dashboard {
 	lease, _ := s.lease()
 	names, err := Captures(s.cfg.Captures)
-	view := dashboard{Lease: lease, CaptureError: err != nil, CSRF: s.csrf}
+	view := dashboard{Lease: lease, CaptureError: err != nil, CSRF: s.csrf, Version: s.cfg.Version}
 	for _, name := range names {
 		info, err := os.Lstat(filepath.Join(s.cfg.Captures, name))
 		if os.IsNotExist(err) {

@@ -3,6 +3,7 @@
 body{font:16px system-ui,sans-serif;background:#f1f4f2;color:#19372b;max-width:1080px;margin:40px auto;padding:0 24px}h1{font-size:32px}section{background:white;padding:24px;margin:20px 0;border:1px solid #c8d4cd;border-radius:12px}button,a.button{background:#245940;color:white;border:0;border-radius:6px;padding:14px 20px;font:inherit;display:inline-block;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}a{color:#245940}table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:12px 8px;border-bottom:1px solid #dde5df}code{font-size:12px;overflow-wrap:anywhere}small{color:#53695d}.scroll{overflow:auto}.status{font-weight:700}form{display:inline}li{margin:12px 0}.notice,[data-state=stale]{color:#824500}.capture-name{display:block;margin-top:4px}time{white-space:nowrap}.live-bar{padding:12px 0}.live-bar small{display:block;margin:6px 0}
 </style><script src="/static/live.js" defer></script></head><body>
 <h1>Testovací laboratoř brány</h1>
+<p><small>Verze laboratoře {{.Version}}</small></p>
 <p>Simulovaná tiskárna zachycuje dokumenty z brány. Místní testovací server má vlastní, oddělenou historii úloh.</p>
 <div class="live-bar"><span id="live-status" role="status" data-state="connecting">Připojuji živý přehled…</span><small>Poslední ověření: <span id="last-checked">čeká na spojení</span></small><a href="/">Obnovit přehled</a></div>
 <noscript><p class="notice">JavaScript je vypnutý. Pro aktuální stav použijte Obnovit přehled.</p></noscript>

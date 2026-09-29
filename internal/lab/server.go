@@ -43,7 +43,7 @@ type Lease struct {
 	IP  string `json:"ip"`
 	MAC string `json:"mac"`
 }
-type Config struct{ Dir, Captures, LeaseFile, Host, Token, Password string }
+type Config struct{ Dir, Captures, LeaseFile, Host, Version, Token, Password string }
 type Server struct {
 	cfg                    Config
 	mu                     sync.Mutex
@@ -62,6 +62,9 @@ func New(c Config) (*Server, error) {
 	}
 	if c.Host != "127.0.0.1:9443" || len(c.Token) < 32 || len(c.Password) < 16 {
 		return nil, errors.New("invalid isolated lab configuration")
+	}
+	if c.Version == "" {
+		c.Version = "dev"
 	}
 	s := &Server{cfg: c, csrf: state.ID(), wake: make(chan struct{}, 1)}
 	b, err := os.ReadFile(filepath.Join(c.Dir, "jobs.json"))
