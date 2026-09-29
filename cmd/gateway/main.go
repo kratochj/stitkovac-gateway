@@ -25,6 +25,7 @@ import (
 	"github.com/kratochj/stitkovac-gateway/internal/platform"
 	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
+	"github.com/kratochj/stitkovac-gateway/internal/telemetry"
 )
 
 var version = "dev"
@@ -154,6 +155,22 @@ func run(args []string) error {
 		if err := s.Recover(ctx, time.Now()); err != nil {
 			return err
 		}
+		id, _, err := s.Identity()
+		if err != nil {
+			return err
+		}
+		events := make(chan string, 32)
+		report := func(code string) {
+			select {
+			case events <- code:
+			default:
+			}
+		}
+		spool, spoolErr := telemetry.Open(*dir, id, version)
+		if spoolErr != nil {
+			slog.Warn("Diagnostic spool unavailable; printing remains independent")
+		}
+		if spool!=nil {defer spool.Close()}
 		var cloudClient *cloud.Client
 		if *cloudURL != "" || *tokenFile != "" {
 			if *device == "" || *cloudURL == "" || *tokenFile == "" {
@@ -168,10 +185,19 @@ func run(args []string) error {
 				return err
 			}
 			worker := &printing.Worker{Store: s, Pool: pool, Dial: printing.Dialer(*device)}
-			cloudClient, err = cloud.New(*cloudURL, token, id, version, worker, nil, nil)
+			cloudClient, err = cloud.New(*cloudURL, token, id, version, worker, nil, report)
 			if err != nil {
 				return err
 			}
+		}
+		if spool != nil {
+			var send func(context.Context, telemetry.Event) error
+			if cloudClient != nil {
+				send = cloudClient.Report
+			}
+			eventStopped := make(chan struct{})
+			go func() { defer close(eventStopped); spool.Run(ctx, events, send) }()
+			defer func() { stop(); <-eventStopped }()
 		}
 		web, err := admin.New(s, *adminAddress, version)
 		if err != nil {
@@ -184,7 +210,7 @@ func run(args []string) error {
 		}()
 		if *device != "" {
 			go func() {
-				result <- dhcp.Serve(ctx, *device, dhcp.Handler{Store: s, Pool: pool}, func(error) { slog.Warn("DHCP request failed; no address acknowledged") })
+				result <- dhcp.Serve(ctx, *device, dhcp.Handler{Store: s, Pool: pool}, func(error) { report("dhcp_request_failed") })
 			}()
 		}
 		cloudStopped := make(chan struct{})

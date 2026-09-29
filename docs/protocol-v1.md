@@ -56,6 +56,13 @@ Nový tiskový pokus nesmí vzniknout automaticky z `UNKNOWN`.
 
 ## Co zbývá v serveru
 
+`POST /events` přijímá očištěnou událost s `eventId`, `gatewayId`, `bootId`,
+`code`, `message`, `version`, `timestamp` a `frames` (file/function/line).
+Vrací 204 až po trvalém uložení do relay fronty; opakované `eventId` je úspěšné
+bez druhého vložení. Session hlavička není nutná, platný gateway token ano.
+Server znovu vynutí allowlist polí/kódů, doplní organizaci a odešle report do
+Rollbaru s původním Go stackem. Gateway neposílá Rollbar access token.
+
 Registrace a rotace tokenů, session fencing, tenant izolace, trvalý outbox,
-claim/start/result, cursor fronty, oddělení od LOCALNET a superadmin přehled.
+claim/start/result, cursor fronty, Rollbar relay, oddělení od LOCALNET a superadmin přehled.
 Před release doplnit kontraktní testy proti skutečnému Spring backendu.

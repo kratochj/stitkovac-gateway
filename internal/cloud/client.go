@@ -19,6 +19,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
+	"github.com/kratochj/stitkovac-gateway/internal/telemetry"
 )
 
 var safeID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
@@ -289,17 +290,20 @@ func (c *Client) Session(parent context.Context) error {
 
 func (c *Client) Run(ctx context.Context) {
 	delay := time.Second
+	failures := 0
 	for ctx.Err() == nil {
 		start := time.Now()
 		_ = c.Session(ctx)
 		if ctx.Err() != nil {
 			return
 		}
-		if c.report != nil {
-			c.report("cloud_disconnected")
+		failures++
+		if failures >= 5 && c.report != nil {
+			c.report("cloud_unavailable")
 		}
 		if time.Since(start) > time.Minute {
 			delay = time.Second
+			failures = 0
 		}
 		timer := time.NewTimer(delay/2 + time.Duration(rand.Int64N(int64(delay/2)+1)))
 		select {
@@ -310,4 +314,8 @@ func (c *Client) Run(ctx context.Context) {
 		}
 		delay = min(delay*2, 30*time.Second)
 	}
+}
+
+func (c *Client) Report(ctx context.Context, e telemetry.Event) error {
+	return c.request(ctx, "POST", "/events", "", e, nil)
 }
