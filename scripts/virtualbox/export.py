@@ -25,8 +25,9 @@ if '--no-export' in sys.argv:
 archive = OUT / 'stitkovac-gateway-lab-arm64.ova'
 if archive.exists():
     raise SystemExit('Export already exists; move it aside explicitly before exporting again')
-subprocess.run(['VBoxManage', 'storageattach', CONFIG['name'], '--storagectl', 'VirtioSCSI',
-                '--port', '2', '--device', '0', '--type', 'dvddrive', '--medium', 'none'], check=True)
+if '"VirtioSCSI-2-0"="none"' not in result.stdout:
+    subprocess.run(['VBoxManage', 'storageattach', CONFIG['name'], '--storagectl', 'VirtioSCSI',
+                    '--port', '2', '--device', '0', '--type', 'dvddrive', '--medium', 'none'], check=True)
 subprocess.run(['VBoxManage', 'export', CONFIG['name'], '--output', str(archive),
                 '--ovf20', '--manifest', '--vsys', '0', '--product', 'Stitkovac Gateway Lab',
                 '--version', '0.1.1', '--description', 'ARM64 Debian lab with isolated WSS server and DHCP/TCP PDF printer simulator.'], check=True)
