@@ -1,8 +1,10 @@
 # Stav implementace
 
-Aktualizováno 2026-09-29. Agent má lokální administraci a cloudový transport. Sousední `stitkovac-server`
-na větvi `feat/gateway-server` nově implementuje serverové napojení i správu bran. Nejde o dokončenou zákaznickou
-instalaci a změny zatím nejsou nasazené ani odeslané do vzdáleného repozitáře.
+Aktualizováno 2026-09-29. Serverová podpora bran je vydaná a nasazená v **2.7.12**
+na `cloud.stitkovac.app`. Agent má lokální administraci, cloudový transport
+a základ aplikačního OTA. Nejde zatím o dokončenou zákaznickou instalaci.
+Gateway změny jsou commitované lokálně na `feat/gateway-foundation`; projekt
+zatím nemá nastavený vzdálený Git repozitář.
 
 ## Hotový základ
 
@@ -17,13 +19,17 @@ instalaci a změny zatím nejsou nasazené ani odeslané do vzdáleného repozit
 | Chyby | Oddělená omezená SQLite fronta, allowlist bez raw errors, opakované předání serverovému relay |
 | Server | Registrace, tokeny, session fencing, samostatná tisková fronta, WSS/HTTP API a Rollbar relay |
 | Web serveru | Registrace a správa tokenů, superadmin přehled, přiřazení brány a MAC k tiskárně |
-| Distribuce | ARM64 cross-build, systemd unit se storage guardem, bootstrap/diagnostika Ansible, `.deb` recept, CI |
+| OTA základ | Ed25519 manifesty, omezené HTTPS stažení, kontrola místa, neměnná vydání, trvalý trial/rollback, launcher s readiness |
+| Distribuce | ARM64 build všech nástrojů, systemd storage guard, Ansible bootstrap, sestavený a rozbalením ověřený `.deb`, ARM64 procesní test |
+
+Podrobnosti: [nasazení serveru](server-deployment-2.7.12.md),
+[OTA implementace a zbývající části](ota-implementation.md).
 
 ## Navazující implementační celky
 
-1. **Nasazení serveru:** nové endpointy jsou implementované a testované lokálně,
-   zatím nejsou v produkci. Ověřit mezireplikovou latenci (záložní oznámení do 5 s),
-   oprávnění skutečného Rollbar projektu a kompatibilitu nainstalovaných klientů.
+1. **Dokončení OTA:** serverové příkazy přes WSS, superadmin rollout a audit,
+   dokončení aktivního tisku před aktualizací, release hosting, klíče a podpisové
+   CI. Výchozí systemd unit zatím není přepnutá na launcher.
 2. **Síťová administrace:** NetworkManager helper, změna Wi-Fi s rollbackem,
    servisní AP, GPIO tlačítko, trvalé síťové profily a firewall provisioning.
 3. **Správa tiskáren:** automatická synchronizace DHCP rezervací a konfigurace,
@@ -31,11 +37,13 @@ instalaci a změny zatím nejsou nasazené ani odeslané do vzdáleného repozit
    Pojmenování a přiřazení brány/MAC/IP je nyní dostupné ve webu serveru ručně.
    Přidělená DHCP adresa sama ještě netvoří serverovou registraci tiskárny.
 4. **Provozní dokončení:** retence tiskových dokumentů a historie, servisní změny
-   přístupů, bezpečné aktualizace/rollback, bootstrap celého OS image a panic recovery
+   přístupů, retence vydání, bootstrap celého OS image a panic recovery
    s původním místem chyby. Běžné transportní chyby už mají bezpečná hlášení.
-5. **Pilot:** ARM64 runtime, PC42E, MAC/IP conflict detection, DHCP interoperabilita,
+5. **Pilot:** produkční end-to-end tisk, samostatný Rollbar projekt/token,
+   kompatibilita nainstalovaných klientů, mezirepliková latence, PC42E,
+   MAC/IP conflict detection, DHCP interoperabilita,
    read-only image, reálné odebrání napájení a měření latence. Bez Raspberry Pi
-   a tiskárny nelze tato ověření nahradit testem na macOS.
+   a tiskárny nelze tato ověření nahradit testem na macOS ani v ARM64 kontejneru.
 
 Při chybě dnešní v1 synchronizace klient znovu připojí WSS a požádá o aktuální
 frontu. Detailní rozlišení neplatného jednotlivého jobu oproti výpadku transportu

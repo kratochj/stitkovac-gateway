@@ -2,7 +2,7 @@
 
 Tento postup je pro vývojovou bránu. První implementace nemá hotový provisioning
 Wi-Fi ani servisní AP. Serverové endpointy a webová registrace jsou implementované
-v sousedním projektu na větvi `feat/gateway-server`, ale zatím nejsou nasazené.
+a nasazené na `cloud.stitkovac.app` ve verzi **2.7.12** od 2026-09-29.
 
 ## Předpoklady
 
@@ -34,8 +34,9 @@ správce hesel. Dočasný soubor s heslem existuje jen v `/run` a playbook jej u
 Opakované spuštění nemění existující heslo, identitu, rezervace ani runtime argumenty.
 
 Bootstrap nesmí běžet při aktivním tisku. Běžný upgrade přes přepis systémových
-souborů není implementovaný. Budoucí updater musí použít verzované releases
-a crash-safe aktivaci podle specifikace.
+souborů se nepoužívá. Podepsané verzované releases, launcher a servisní
+updater popisuje [stav OTA implementace](ota-implementation.md); automatické
+ovládání přes server a provisioning klíčů ještě nejsou propojené.
 
 ## Read-only systém a aktivace
 
@@ -72,7 +73,9 @@ make arm64
 sh scripts/package.sh 0.1.0-dev
 ```
 
-Balíček obsahuje ARM64 binární soubor, storage guard a systemd unit. Samotná
+Balíček obsahuje ARM64 agenta, launcher, updater, storage guard a systemd unit.
+Výchozí služba zatím používá přímo agenta; podepisovací nástroj patří pouze
+na release stanici a není v balíčku. Samotná
 instalace `.deb` netvoří plně připravenou bránu: účet, runtime konfigurace,
 úložiště a inicializace jsou odpovědností provisioningu. Balíček službu sám
 nespouští, neobsahuje hesla, tokeny ani univerzální identitu.
@@ -82,9 +85,10 @@ nespouští, neobsahuje hesla, tokeny ani univerzální identitu.
 Volitelné přepínače `--cloud-url` a `--cloud-token-file` vyžadují také
 `--dhcp-interface`. Token je v samostatném souboru s režimem 0600 a patří
 konkrétní bráně. URL musí poskytovat [protokol v1](protocol-v1.md).
-Současný produkční server jej ještě nemá; nezadávejte do brány běžný uživatelský JWT.
+Produkční server od 2.7.12 protokol poskytuje; použijte token vytvořený
+v administraci bran. Běžný uživatelský JWT není tokenem brány.
 
 Integrační test v `internal/cloud` používá vlastní TLS server a simuluje tiskové
 spojení. Ověřuje dispatch a duplicity, nikoli hardwarovou kompatibilitu.
-Před zákaznickou instalací nasadit ověřený server, dokončit test proti PC42E,
+Před zákaznickou instalací dokončit test proti PC42E,
 firewall, změnu Wi-Fi a sérii fyzických power-cut zkoušek podle specifikace.

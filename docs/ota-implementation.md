@@ -78,7 +78,7 @@ bin/gateway-release --artifact bin/gateway-linux-arm64 --version X.Y.Z \
   --manifest-out /private/release/manifest.json > /private/release/public-keys.json
 ```
 
-Nástroj ověří ARM64 ELF artefakt, velikost a verzi, vytvoří podpis a vypíše pouze
+Nástroj ověří ARM64 ELF artefakt, velikost a formát zadané verze, vytvoří podpis a vypíše pouze
 veřejný trust anchor. Existující manifest nepřepisuje. Na release hosting patří
 manifest a přesně podepsaná binárka pod názvem `gateway`. Veřejný klíč se na
 bránu distribuuje odděleně při přípravě OS, nikoli automaticky z téhož hostingu.
@@ -90,7 +90,9 @@ Automatické testy pokrývají neplatné podpisy, klíče, platformu, protokol,
 checksum, zkrácené i prodloužené soubory, symlinky, pokusy o přepsání vydání,
 poškozený výběrový manifest, nedokončenou instalaci, potvrzení i obnovu
 nepotvrzeného startu. Procesní testy ověřují návrat po pádu, timeoutu a chybné
-readiness, vyloučení druhého launcheru a povolení práce až po potvrzení verze. `scripts/test-ota.sh` navíc v izolovaném ARM64 Linux kontejneru spustí skutečného
+readiness, vyloučení druhého launcheru a povolení práce až po potvrzení verze.
+
+`scripts/test-ota.sh` navíc v izolovaném ARM64 Linux kontejneru spustí skutečného
 agenta a ověří rollback podepsaného vydání s chybnou ohlášenou verzí. Používá
 jednorázový testovací klíč, po podpisu jej odstraní a běží bez sítě. Tento test
 je zařazený také do CI; Debian balíček byl sestavený a zkontrolovaný v Linuxu.
@@ -101,7 +103,7 @@ napájení musí potvrdit pilot na konkrétním hardware.
 
 - Provisionovaný HTTPS release hosting a podepisovací CI pipeline s odděleným klíčem.
 - Serverové OTA příkazy přes WSS, audit, stavové hlášení a superadmin rollout.
-- Dokončení rozpracovaného tisku před aktivací, retence vydání a kontrola místa.
+- Dokončení rozpracovaného tisku před aktivací, retence vydání a úklid přerušených instalací.
 - Provisioning klíčů, launcheru a celého read-only image; hardwarové power-cut testy.
 
 Dokud nejsou tyto části propojené a ověřené, OTA není zákaznická funkce.

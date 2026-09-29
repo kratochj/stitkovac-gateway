@@ -1,8 +1,9 @@
 # Gateway API v1: agent a server
 
-Stav: implementováno v agentovi a v sousedním `stitkovac-server` na větvi
-`feat/gateway-server`. Změny jsou lokální; produkční cloud je zatím nemá.
-Před zákaznickým provozem je třeba nasazení a hardwarový pilot.
+Stav: implementováno v agentovi a v serveru. Serverová podpora je nasazená
+na `cloud.stitkovac.app` od verze **2.7.12** (2026-09-29).
+Před zákaznickým provozem brány je třeba dokončit provisioning a hardwarový pilot.
+OTA příkazy zatím nejsou součástí tohoto API.
 
 Všechny cesty začínají `/api/gateway/v1`. Každý request má Bearer token brány.
 Po WSS handshake mají HTTP requesty pro úlohy také `X-Gateway-Session`.
