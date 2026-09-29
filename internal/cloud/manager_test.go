@@ -14,7 +14,7 @@ import (
 func TestConfigurationPersistenceAndCredentialBoundary(t *testing.T) {
 	dir := t.TempDir()
 	token := strings.Repeat("secret", 8)
-	manager := NewManager(dir, Config{}, nil)
+	manager := NewManager(dir, "gateway-test", Config{}, nil)
 	if err := manager.Save("https://CLOUD.example/", token); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestReconfigurationWaitsForPreviousWorkerToDrain(t *testing.T) {
 	drain := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	manager := NewManager(dir, first, func(cfg Config, observe func(string)) (Connection, error) {
+	manager := NewManager(dir, "gateway-test", first, func(cfg Config, observe func(string)) (Connection, error) {
 		c := &managedTestConnection{cfg: cfg, started: started, observe: observe, cancelled: make(chan struct{}), drained: make(chan struct{})}
 		if cfg == first {
 			c.cancelled, c.drained = cancelled, drain
@@ -138,12 +138,79 @@ func TestReconfigurationWaitsForPreviousWorkerToDrain(t *testing.T) {
 
 func TestFailedSaveDoesNotReplaceRuntimeConfiguration(t *testing.T) {
 	cfg := Config{URL: "https://original.example", Token: strings.Repeat("s", 32)}
-	manager := NewManager(filepath.Join(t.TempDir(), "absent"), cfg, nil)
+	manager := NewManager(filepath.Join(t.TempDir(), "absent"), "gateway-test", cfg, nil)
 	before := manager.Status()
 	if err := manager.Save("https://new.example", strings.Repeat("n", 32)); err == nil {
 		t.Fatal("missing data storage accepted")
 	}
 	if manager.Status() != before {
 		t.Fatal("failed persistence changed active settings")
+	}
+}
+
+func TestOTAPauseWaitsForPrintDrainAndBlocksCredentialChanges(t *testing.T) {
+	cfg := Config{URL: "https://cloud.example", Token: strings.Repeat("s", 32)}
+	started := make(chan Config, 4)
+	cancelled := make(chan struct{})
+	drained := make(chan struct{})
+	first := true
+	manager := NewManager(t.TempDir(), "gateway-test", cfg, func(c Config, observe func(string)) (Connection, error) {
+		connection := &managedTestConnection{cfg: c, started: started, cancelled: make(chan struct{}), drained: make(chan struct{}), observe: observe}
+		if first {
+			connection.cancelled = cancelled
+			connection.drained = drained
+			first = false
+		} else {
+			close(connection.drained)
+		}
+		return connection, nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); manager.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	<-started
+	paused := make(chan error, 1)
+	go func() { paused <- manager.Pause(ctx) }()
+	<-cancelled
+	select {
+	case <-paused:
+		t.Fatal("pause completed before active print finished")
+	default:
+	}
+	if manager.Save(cfg.URL, strings.Repeat("new", 16)) == nil {
+		t.Fatal("changed token during activation")
+	}
+	close(drained)
+	if err := <-paused; err != nil {
+		t.Fatal(err)
+	}
+	if manager.Status().State != "updating" {
+		t.Fatal(manager.Status())
+	}
+	manager.Resume()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("printing did not resume")
+	}
+}
+
+func TestOTASourceSurvivesTokenRotationButNotOriginChange(t *testing.T) {
+	cfg := Config{URL: "https://cloud.example", Token: strings.Repeat("a", 32)}
+	m := NewManager(t.TempDir(), "gateway-test", cfg, nil)
+	source := m.Source()
+	if err := m.Save(cfg.URL, strings.Repeat("b", 32)); err != nil {
+		t.Fatal(err)
+	}
+	if m.Source() != source {
+		t.Fatal("token rotation lost ownership of a durable OTA result")
+	}
+	if err := m.Save("https://other.example", strings.Repeat("c", 32)); err != nil {
+		t.Fatal(err)
+	}
+	if m.Source() == source {
+		t.Fatal("origin change retained command scope")
 	}
 }

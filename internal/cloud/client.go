@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/kratochj/stitkovac-gateway/internal/ota"
 	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
 	"github.com/kratochj/stitkovac-gateway/internal/telemetry"
@@ -33,6 +34,7 @@ type Client struct {
 	worker                   *printing.Worker
 	report                   func(string)
 	OnState                  func(string)
+	OnOTA                    func(ota.Remote)
 }
 type envelope struct {
 	Version      int    `json:"version"`
@@ -41,6 +43,7 @@ type envelope struct {
 	SessionID    string `json:"sessionId,omitempty"`
 	GatewayID    string `json:"gatewayId,omitempty"`
 	AgentVersion string `json:"agentVersion,omitempty"`
+	OTAProtocol  int    `json:"otaProtocol,omitempty"`
 }
 type page struct {
 	Jobs       []string `json:"jobs"`
@@ -207,7 +210,11 @@ func (c *Client) Session(parent context.Context) error {
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(16 << 10)
-	hello, _ := json.Marshal(envelope{Version: 1, Type: "hello", MessageID: state.ID(), GatewayID: c.id, AgentVersion: c.version})
+	protocol := 0
+	if c.OnOTA != nil {
+		protocol = 1
+	}
+	hello, _ := json.Marshal(envelope{OTAProtocol: protocol, Version: 1, Type: "hello", MessageID: state.ID(), GatewayID: c.id, AgentVersion: c.version})
 	if err := conn.Write(ctx, websocket.MessageText, hello); err != nil {
 		return err
 	}
@@ -223,6 +230,9 @@ func (c *Client) Session(parent context.Context) error {
 	}
 	if c.OnState != nil {
 		c.OnState("connected")
+	}
+	if c.OnOTA != nil {
+		c.OnOTA(otaRemote{c})
 	}
 	wake := make(chan struct{}, 1)
 	wake <- struct{}{}
@@ -241,6 +251,9 @@ func (c *Client) Session(parent context.Context) error {
 			if kind != websocket.MessageText || json.Unmarshal(b, &e) != nil || e.Version != 1 {
 				fail <- errors.New("invalid gateway message")
 				return
+			}
+			if e.Type == "ota.available" && c.OnOTA != nil {
+				c.OnOTA(otaRemote{c})
 			}
 			if e.Type == "jobs.available" {
 				select {
@@ -337,4 +350,35 @@ func (c *Client) Run(ctx context.Context) {
 
 func (c *Client) Report(ctx context.Context, e telemetry.Event) error {
 	return c.request(ctx, "POST", "/events", "", e, nil)
+}
+
+// Scope durable commands to the origin and immutable device identity, not a rotating token.
+func configSource(base, id string) string { return base + "#" + id }
+
+type otaRemote struct{ client *Client }
+
+func (r otaRemote) Source() string { return configSource(r.client.base, r.client.id) }
+func (r otaRemote) Command(ctx context.Context) (*ota.Command, error) {
+	var response struct {
+		Command *ota.Command `json:"command"`
+	}
+	err := r.client.request(ctx, "GET", "/ota/command", "", nil, &response)
+	return response.Command, err
+}
+func (r otaRemote) State(ctx context.Context, id string) (string, error) {
+	var response struct {
+		State string `json:"state"`
+	}
+	err := r.client.request(ctx, "GET", "/ota/"+id, "", nil, &response)
+	return response.State, err
+}
+func (r otaRemote) Report(ctx context.Context, id string, report ota.Report) error {
+	return r.client.request(ctx, "POST", "/ota/"+id+"/report", "", report, nil)
+}
+func (r otaRemote) Activate(ctx context.Context, id string, sequence int64) (bool, error) {
+	var response struct {
+		Allowed bool `json:"allowed"`
+	}
+	err := r.client.request(ctx, "POST", "/ota/"+id+"/activate", "", map[string]int64{"sequence": sequence}, &response)
+	return response.Allowed, err
 }

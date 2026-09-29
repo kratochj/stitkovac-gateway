@@ -28,21 +28,25 @@ type Factory func(Config, func(string)) (Connection, error)
 // Manager serializes configuration changes and never overlaps two cloud workers.
 // A cancelled worker completes any already-authorized local TCP write before exiting.
 type Manager struct {
-	mu      sync.RWMutex
-	config  Config
-	status  Status
-	client  Connection
-	path    string
-	changed chan struct{}
-	factory Factory
+	mu          sync.RWMutex
+	config      Config
+	status      Status
+	client      Connection
+	path        string
+	id          string
+	changed     chan struct{}
+	factory     Factory
+	paused      bool
+	pauseDone   chan struct{}
+	pauseClosed bool
 }
 
-func NewManager(dir string, cfg Config, factory Factory) *Manager {
+func NewManager(dir, id string, cfg Config, factory Factory) *Manager {
 	status := Status{URL: cfg.URL, TokenSet: cfg.Token != "", State: "unconfigured"}
 	if cfg.Token != "" {
 		status.State = "connecting"
 	}
-	return &Manager{config: cfg, status: status, path: filepath.Join(dir, "cloud.json"), changed: make(chan struct{}, 1), factory: factory}
+	return &Manager{id: id, config: cfg, status: status, path: filepath.Join(dir, "cloud.json"), changed: make(chan struct{}, 1), factory: factory}
 }
 
 func (m *Manager) Status() Status {
@@ -54,6 +58,9 @@ func (m *Manager) Status() Status {
 func (m *Manager) Save(base, token string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.paused {
+		return errors.New("gateway update is activating")
+	}
 	// A blank field may retain a token only for the exact same normalized origin.
 	// Never send an existing credential to a newly entered server.
 	if strings.TrimSpace(token) == "" {
@@ -101,6 +108,14 @@ func (m *Manager) Run(ctx context.Context) {
 		}
 		m.mu.Lock()
 		cfg := m.config
+		if m.paused {
+			cfg = Config{}
+			m.status.State = "updating"
+			if !m.pauseClosed {
+				close(m.pauseDone)
+				m.pauseClosed = true
+			}
+		}
 		// The latest persisted configuration supersedes all queued notifications.
 		select {
 		case <-m.changed:
@@ -115,7 +130,7 @@ func (m *Manager) Run(ctx context.Context) {
 			client, err := m.factory(cfg, func(state string) {
 				m.mu.Lock()
 				defer m.mu.Unlock()
-				if m.config == cfg && m.status.State != "applying" {
+				if m.config == cfg && m.status.State != "applying" && !m.paused {
 					m.status.State = state
 				}
 			})
@@ -147,4 +162,42 @@ func (m *Manager) Report(ctx context.Context, e telemetry.Event) error {
 		return errors.New("cloud is not connected")
 	}
 	return m.client.Report(ctx, e)
+}
+
+// Pause stops claiming work and waits for every already-authorized local write.
+func (m *Manager) Pause(ctx context.Context) error {
+	m.mu.Lock()
+	if !m.paused {
+		m.paused = true
+		m.pauseDone = make(chan struct{})
+		m.pauseClosed = false
+		m.status.State = "updating"
+	}
+	done := m.pauseDone
+	m.mu.Unlock()
+	select {
+	case m.changed <- struct{}{}:
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (m *Manager) Resume() {
+	m.mu.Lock()
+	m.paused = false
+	m.mu.Unlock()
+	select {
+	case m.changed <- struct{}{}:
+	default:
+	}
+}
+
+func (m *Manager) Source() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return configSource(m.config.URL, m.id)
 }

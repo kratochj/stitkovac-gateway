@@ -18,6 +18,7 @@ import (
 )
 
 var messages = map[string]string{
+	"ota_update_failed":       "Gateway application update failed or rolled back",
 	"dhcp_request_failed":     "DHCP request could not be committed or sent",
 	"cloud_unavailable":       "Cloud synchronization repeatedly failed",
 	"storage_recovery_failed": "Persistent state recovery failed",

@@ -25,7 +25,7 @@ func TestCloudSettingsRequireSessionOriginAndCSRFAndNeverEchoToken(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := cloud.NewManager(dir, cloud.Config{}, nil)
+	manager := cloud.NewManager(dir, "gateway-test", cloud.Config{}, nil)
 	s.Cloud = manager
 	cookie := &http.Cookie{Name: "gateway_session", Value: "test-session"}
 	s.sessions[sha256.Sum256([]byte(cookie.Value))] = session{CSRF: "test-csrf", Expires: time.Now().Add(time.Minute)}

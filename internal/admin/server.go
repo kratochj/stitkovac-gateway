@@ -15,6 +15,7 @@ import (
 	"github.com/kratochj/stitkovac-gateway/internal/auth"
 	"github.com/kratochj/stitkovac-gateway/internal/cloud"
 	"github.com/kratochj/stitkovac-gateway/internal/network"
+	"github.com/kratochj/stitkovac-gateway/internal/ota"
 	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
 )
@@ -28,6 +29,7 @@ type session struct {
 	Probe   *printing.ProbeResult
 }
 type Server struct {
+	OTA     interface{ Status() ota.Report }
 	Network interface {
 		Status(context.Context) (network.Status, error)
 		Scan(context.Context) ([]network.AccessPoint, error)
@@ -234,7 +236,13 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, cloudError st
 		http.Error(w, "Evidence úloh není dostupná. Zkontrolujte datové úložiště.", http.StatusServiceUnavailable)
 		return
 	}
+	var otaStatus *ota.Report
+	if s.OTA != nil {
+		status := s.OTA.Status()
+		otaStatus = &status
+	}
 	s.render(w, "index.html", struct {
+		OTA               *ota.Report
 		ID, Version, CSRF string
 		Now               int64
 		Devices           []state.Reservation
@@ -245,7 +253,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, cloudError st
 		Probe             *printing.ProbeResult
 		Uncertain         int
 	}{
-		ID: s.gatewayID, Version: s.Version, CSRF: v.CSRF, Now: time.Now().Unix(), Devices: reservations,
+		OTA: otaStatus, ID: s.gatewayID, Version: s.Version, CSRF: v.CSRF, Now: time.Now().Unix(), Devices: reservations,
 		Cloud: connection, CloudError: cloudError, CloudSaved: r.URL.Query().Get("cloud") == "saved",
 		PrinterChecks: s.TestPrinter != nil, Probe: v.Probe, Uncertain: uncertain,
 	})

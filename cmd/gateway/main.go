@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -24,16 +25,21 @@ import (
 	"github.com/kratochj/stitkovac-gateway/internal/dhcp"
 	"github.com/kratochj/stitkovac-gateway/internal/launcher"
 	networkadmin "github.com/kratochj/stitkovac-gateway/internal/network"
+	"github.com/kratochj/stitkovac-gateway/internal/ota"
 	"github.com/kratochj/stitkovac-gateway/internal/platform"
 	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
 	"github.com/kratochj/stitkovac-gateway/internal/telemetry"
+	"github.com/kratochj/stitkovac-gateway/internal/update"
 )
 
 var version = "dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil && !errors.Is(err, context.Canceled) {
+		if errors.Is(err, ota.ErrRestart) {
+			os.Exit(launcher.RestartExitCode)
+		}
 		slog.Error("Gateway stopped", "error", err)
 		os.Exit(1)
 	}
@@ -60,6 +66,9 @@ func run(args []string) error {
 	last := flags.String("pool-last", "192.168.77.199", "Last DHCP address")
 	device := flags.String("dhcp-interface", "", "Dedicated Linux printer interface; empty disables DHCP")
 	cloudURL := flags.String("cloud-url", "", "HTTPS origin implementing gateway API v1; empty disables cloud")
+	repository := flags.String("ota-repository", "", "Provisioned HTTPS release origin; empty disables OTA")
+	releaseRoot := flags.String("ota-releases", "/data/gateway-releases", "Persistent signed release directory")
+	releaseKeys := flags.String("ota-keys", "/etc/stitkovac-gateway/release-keys.json", "Provisioned public trust anchors")
 	tokenFile := flags.String("cloud-token-file", "", "Private file containing the gateway token")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
@@ -226,14 +235,38 @@ func run(args []string) error {
 			return errors.New("cloud requires a dedicated printer interface")
 		}
 		worker := &printing.Worker{Store: s, Pool: pool, Dial: printing.Dialer(*device)}
-		cloudManager := cloud.NewManager(*dir, cfg, func(cfg cloud.Config, observe func(string)) (cloud.Connection, error) {
+		var updater *ota.Controller
+		cloudManager := cloud.NewManager(*dir, id, cfg, func(cfg cloud.Config, observe func(string)) (cloud.Connection, error) {
 			client, err := cloud.New(cfg.URL, cfg.Token, id, version, worker, nil, report)
 			if err != nil {
 				return nil, err
 			}
 			client.OnState = observe
+			if updater != nil {
+				client.OnOTA = updater.Notify
+			}
 			return client, nil
 		})
+		var restart <-chan struct{}
+		if *repository != "" {
+			if *readyFD == 0 || *continueFD == 0 || *device == "" {
+				return errors.New("OTA requires the launcher and a printer interface")
+			}
+			keys, e := update.ReadKeys(*releaseKeys)
+			if e != nil {
+				return e
+			}
+			releases, e := update.Open(*releaseRoot, keys, runtime.GOOS+"-"+runtime.GOARCH)
+			if e != nil {
+				return e
+			}
+			updater, e = ota.New(*dir, *repository, version, releases, cloudManager)
+			if e != nil {
+				return e
+			}
+			updater.OnDiagnostic = report
+			restart = updater.Restart()
+		}
 		if spool != nil {
 			var send func(context.Context, telemetry.Event) error
 			if *device != "" {
@@ -246,6 +279,9 @@ func run(args []string) error {
 		web, err := admin.New(s, *adminAddress, version)
 		if err != nil {
 			return err
+		}
+		if updater != nil {
+			web.OTA = updater
 		}
 		web.Network = networkadmin.NewClient(*networkSocket)
 		web.AdditionalHost = *apAddress
@@ -303,6 +339,11 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
+		if updater != nil {
+			otaStopped := make(chan struct{})
+			go func() { defer close(otaStopped); updater.Run(ctx) }()
+			defer func() { stop(); <-otaStopped }()
+		}
 		cloudStopped := make(chan struct{})
 		if *device != "" {
 			go func() { defer close(cloudStopped); cloudManager.Run(ctx) }()
@@ -312,6 +353,9 @@ func run(args []string) error {
 		slog.Info("Gateway services started", "version", version, "dhcpEnabled", *device != "")
 		select {
 		case err = <-result:
+			stop()
+		case <-restart:
+			err = ota.ErrRestart
 			stop()
 		case <-ctx.Done():
 		}
