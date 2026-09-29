@@ -14,6 +14,7 @@ import (
 
 	"github.com/kratochj/stitkovac-gateway/internal/auth"
 	"github.com/kratochj/stitkovac-gateway/internal/cloud"
+	"github.com/kratochj/stitkovac-gateway/internal/network"
 	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
 )
@@ -27,11 +28,18 @@ type session struct {
 	Probe   *printing.ProbeResult
 }
 type Server struct {
-	Store       *state.Store
-	TestPrinter func(context.Context, string) printing.ProbeResult
-	probeBusy   bool
-	nextProbe   time.Time
-	Cloud       interface {
+	Network interface {
+		Status(context.Context) (network.Status, error)
+		Scan(context.Context) ([]network.AccessPoint, error)
+		Apply(context.Context, network.WiFiRequest) error
+		ServiceAP(context.Context, bool) error
+	}
+	AdditionalHost string
+	Store          *state.Store
+	TestPrinter    func(context.Context, string) printing.ProbeResult
+	probeBusy      bool
+	nextProbe      time.Time
+	Cloud          interface {
 		Status() cloud.Status
 		Save(string, string) error
 	}
@@ -61,6 +69,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /cloud", s.configureCloud)
 	mux.HandleFunc("POST /printers/check", s.probePrinter)
 	mux.HandleFunc("GET /jobs", s.history)
+	mux.HandleFunc("GET /network", s.networkPage)
+	mux.HandleFunc("POST /network/{action}", s.configureNetwork)
 	mux.HandleFunc("GET /{$}", s.index)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -68,7 +78,7 @@ func (s *Server) Handler() http.Handler {
 		// no-referrer makes browser form POSTs send Origin: null, including our own login.
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
-		if r.Host != s.Host {
+		if r.Host != s.Host && (s.AdditionalHost == "" || r.Host != s.AdditionalHost) {
 			http.Error(w, "Neplatná adresa brány.", http.StatusMisdirectedRequest)
 			return
 		}
@@ -76,7 +86,7 @@ func (s *Server) Handler() http.Handler {
 			http.Error(w, "Je vyžadováno HTTPS.", http.StatusBadRequest)
 			return
 		}
-		if r.Method == http.MethodPost && r.Header.Get("Origin") != "https://"+s.Host {
+		if r.Method == http.MethodPost && r.Header.Get("Origin") != "https://"+r.Host {
 			http.Error(w, "Neplatný původ požadavku.", http.StatusForbidden)
 			return
 		}
@@ -86,7 +96,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
-	t := template.Must(template.New(name).Funcs(template.FuncMap{"formatTime": formatTime, "attemptLabel": attemptLabel, "attemptMessage": attemptMessage, "probeMessage": probeMessage}).ParseFS(assets, "templates/"+name))
+	t := template.Must(template.New(name).Funcs(template.FuncMap{"networkMessage": networkMessage, "networkMode": networkMode, "formatTime": formatTime, "attemptLabel": attemptLabel, "attemptMessage": attemptMessage, "probeMessage": probeMessage}).ParseFS(assets, "templates/"+name))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := t.Execute(w, data); err != nil {
 		return

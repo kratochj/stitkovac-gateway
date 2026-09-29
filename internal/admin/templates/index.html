@@ -2,7 +2,7 @@
 <html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Zařízení – Štítkovač Gateway</title><link rel="stylesheet" href="/static/style.css"></head>
 <body><header><strong>Štítkovač Gateway</strong><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Odhlásit se</button></form></header>
 <main><h1>Zařízení na tiskové síti</h1><p class="identity">Brána <code>{{.ID}}</code> <span>Verze {{.Version}}</span></p>
-<nav class="page-nav" aria-label="Správa brány"><a href="#printers">Tiskárny</a><a href="/jobs">Tiskové úlohy</a><a href="#cloud">Připojení k serveru</a></nav>
+<nav class="page-nav" aria-label="Správa brány"><a href="#printers">Tiskárny</a><a href="/network">Síť</a><a href="/jobs">Tiskové úlohy</a><a href="#cloud">Připojení k serveru</a></nav>
 {{if .Uncertain}}<aside class="warning"><strong>Nejistý výsledek tisku: {{.Uncertain}}</strong><p>Na dotčených tiskárnách je další přenos blokovaný. <a href="/jobs?state=UNKNOWN">Zobrazit úlohy ke kontrole</a>.</p></aside>{{end}}
 <section id="cloud" class="cloud-settings" aria-labelledby="cloud-title">
 <h2 id="cloud-title">Připojení k serveru</h2>

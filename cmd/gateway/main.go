@@ -23,6 +23,7 @@ import (
 	"github.com/kratochj/stitkovac-gateway/internal/cloud"
 	"github.com/kratochj/stitkovac-gateway/internal/dhcp"
 	"github.com/kratochj/stitkovac-gateway/internal/launcher"
+	networkadmin "github.com/kratochj/stitkovac-gateway/internal/network"
 	"github.com/kratochj/stitkovac-gateway/internal/platform"
 	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
@@ -40,7 +41,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: gateway init|serve|version")
+		return errors.New("usage: gateway init|certificate|serve|version")
 	}
 	if args[0] == "version" {
 		fmt.Println(version)
@@ -52,6 +53,8 @@ func run(args []string) error {
 	dir := flags.String("data-dir", "/data/gateway", "Persistent state directory")
 	passwordFile := flags.String("password-file", "", "Read provisioning password from a private file (init only)")
 	adminAddress := flags.String("admin-address", "127.0.0.1:8443", "Explicit IPv4 address and port for HTTPS")
+	apAddress := flags.String("ap-admin-address", "", "Optional explicit service AP IPv4 address and port for HTTPS")
+	networkSocket := flags.String("network-socket", networkadmin.SocketPath, "Root network helper socket")
 	printerAddress := flags.String("printer-address", "192.168.77.1/24", "Gateway address on printer interface")
 	first := flags.String("pool-first", "192.168.77.50", "First DHCP address")
 	last := flags.String("pool-last", "192.168.77.199", "Last DHCP address")
@@ -72,6 +75,13 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	var apListen netip.AddrPort
+	if *apAddress != "" {
+		apListen, err = netip.ParseAddrPort(*apAddress)
+		if err != nil || !apListen.Addr().Is4() || !apListen.Addr().IsPrivate() || apListen.Port() == 0 || network.Contains(apListen.Addr()) {
+			return errors.New("AP listener requires a separate private IPv4 address and port")
+		}
+	}
 	ipFirst, err := netip.ParseAddr(*first)
 	if err != nil {
 		return err
@@ -85,6 +95,21 @@ func run(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "certificate":
+		if !apListen.IsValid() {
+			return errors.New("--ap-admin-address is required")
+		}
+		unlock, err := platform.Lock(*dir)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		fingerprint, err := platform.ExtendCertificate(*dir, []net.IP{net.IP(apListen.Addr().AsSlice()), net.IP(pool.Server.AsSlice())})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("TLS SHA-256: %s\n", fingerprint)
+		return nil
 	case "init":
 		if *passwordFile == "" {
 			return errors.New("--password-file is required")
@@ -124,7 +149,11 @@ func run(args []string) error {
 		if _, err := os.Lstat(filepath.Join(*dir, "gateway.db")); !errors.Is(err, os.ErrNotExist) {
 			return errors.New("state already exists or cannot be inspected")
 		}
-		fingerprint, err := platform.Certificate(*dir, []net.IP{net.IP(listen.Addr().AsSlice()), net.IP(pool.Server.AsSlice()), net.IPv4(127, 0, 0, 1)})
+		ips := []net.IP{net.IP(listen.Addr().AsSlice()), net.IP(pool.Server.AsSlice()), net.IPv4(127, 0, 0, 1)}
+		if apListen.IsValid() {
+			ips = append(ips, net.IP(apListen.Addr().AsSlice()))
+		}
+		fingerprint, err := platform.Certificate(*dir, ips)
 		if err != nil {
 			return err
 		}
@@ -218,6 +247,8 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
+		web.Network = networkadmin.NewClient(*networkSocket)
+		web.AdditionalHost = *apAddress
 		if *device != "" {
 			web.Cloud = cloudManager
 			web.TestPrinter = worker.Probe
@@ -228,14 +259,24 @@ func run(args []string) error {
 			return err
 		}
 		server.TLSConfig.Certificates = []tls.Certificate{certificate}
-		listener, err := tls.Listen("tcp4", *adminAddress, server.TLSConfig)
+		plainListener, err := platform.ListenFreebind(ctx, *adminAddress)
 		if err != nil {
 			return err
 		}
+		listener := tls.NewListener(plainListener, server.TLSConfig)
 		defer listener.Close()
 		defer server.Close()
-		result := make(chan error, 2)
+		result := make(chan error, 3)
 		go func() { result <- server.Serve(listener) }()
+		if apListen.IsValid() {
+			plainAP, e := platform.ListenFreebind(ctx, *apAddress)
+			if e != nil {
+				return e
+			}
+			apListener := tls.NewListener(plainAP, server.TLSConfig)
+			defer apListener.Close()
+			go func() { result <- server.Serve(apListener) }()
+		}
 		dhcpReady := make(chan struct{})
 		dhcpStopped := make(chan struct{})
 		if *device != "" {

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Síť – Štítkovač Gateway</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><header><strong>Štítkovač Gateway</strong><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Odhlásit se</button></form></header>
+<main><h1>Síťová administrace</h1><nav class="page-nav" aria-label="Správa brány"><a href="/">Tiskárny a server</a><a href="/jobs">Tiskové úlohy</a><a href="/network" aria-current="page">Síť</a></nav>
+{{if .Message}}<aside role="status">{{networkMessage .Message}}</aside>{{end}}
+{{if .Unavailable}}<p class="warning">Síťová správa není nainstalovaná nebo neběží. Připojení k serveru a tisk fungují nezávisle na této stránce.</p>{{else}}
+{{with .Network}}
+{{if .Simulation}}<aside class="warning"><strong>Simulace sítě</strong><p>Tato brána nemá skutečný Wi-Fi adaptér. Změny ověřují ovládání a návrat nastavení; síť virtuálního počítače se nemění.</p></aside>{{end}}
+<section><h2>Stav připojení</h2><p role="status"><strong>{{networkMode .Mode}}</strong>{{if .SSID}} · {{.SSID}}{{end}}</p>
+{{if .Error}}<p class="error" role="alert">{{networkMessage .Error}}</p>{{end}}
+<dl><dt>IPv4 adresa</dt><dd>{{if .Link.Address}}{{.Link.Address}}{{else}}Nepřidělená{{end}}</dd><dt>Výchozí brána</dt><dd>{{if .Link.Gateway}}{{.Link.Gateway}}{{else}}Žádná{{end}}</dd><dt>DNS</dt><dd>{{range .Link.DNS}}{{.}} {{else}}Žádné{{end}}</dd><dt>Tisková síť</dt><dd>{{.PrinterCIDR}}</dd></dl>
+<a class="refresh" href="/network">Obnovit stav</a></section>
+{{end}}
+<section class="cloud-settings"><h2>Wi-Fi zákazníka</h2><p>Brána ověří připojení, IP adresu, DNS a TLS spojení se serverem. Pokud ověření neprojde, obnoví původní síť nebo servisní AP do 90 sekund. Změnu provádějte mimo tisk.</p>
+<form method="post" action="/network/scan"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Vyhledat sítě</button></form>
+{{if .Networks}}<div class="table-wrap"><table><caption>Nalezené sítě</caption><thead><tr><th>Název sítě</th><th>Signál</th><th>Zabezpečení</th></tr></thead><tbody>{{range .Networks}}<tr><td>{{.SSID}}</td><td>{{.Signal}} %</td><td>{{.Security}}</td></tr>{{end}}</tbody></table></div>{{end}}
+<form method="post" action="/network/wifi"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="ssid">Název sítě (SSID)</label><input id="ssid" name="ssid" required maxlength="32" autocomplete="off" list="networks" spellcheck="false" value="{{.Network.SSID}}"><datalist id="networks">{{range .Networks}}<option value="{{.SSID}}">{{.Security}}</option>{{end}}</datalist>
+<label for="security">Zabezpečení</label><select id="security" name="security"><option value="wpa-psk">WPA2 / WPA2 a WPA3 Personal</option><option value="sae">Pouze WPA3 Personal</option><option value="open">Otevřená síť</option></select>
+<label for="password">Heslo Wi-Fi</label><input id="password" name="password" type="password" maxlength="64" autocomplete="new-password"><small>Heslo zadejte při každé změně; uložené heslo se nezobrazuje. Pro otevřenou síť nechte prázdné. Podnikové přihlášení 802.1X ani přihlašovací web nejsou podporované.</small>
+<label for="country">Kód země</label><input id="country" name="country" value="{{.Network.Country}}" pattern="[A-Z]{2}" minlength="2" maxlength="2" required><small>Pro Českou republiku CZ. Kód určuje povolené rádiové kanály.</small>
+<label><input type="checkbox" name="hidden" value="1"> Skrytá síť</label>
+<button type="submit">Ověřit a uložit Wi-Fi</button></form></section>
+<section><h2>Servisní Wi-Fi</h2><p><strong>{{.Network.APSSID}}</strong> · {{.Network.APAddress}}</p><p>Heslo servisní Wi-Fi je v instalačních údajích brány. Po připojení otevřete <a href="{{.APURL}}">{{.APURL}}</a>. Přístup do administrace vyžaduje její samostatné heslo.</p>
+<p>Zapnutí servisní Wi-Fi přeruší spojení se serverem. Pokud je uložený profil zákazníka, brána se k němu po 15 minutách vrátí. Bez uloženého profilu zůstane servisní Wi-Fi zapnutá.</p>
+{{if .Network.APUntil}}<p>Návrat na Wi-Fi: {{formatTime .Network.APUntil}} UTC.</p>{{end}}
+{{if .Network.GPIO}}<p>Servisní Wi-Fi můžete vyvolat také podržením servisního tlačítka po dobu 5 sekund.</p>{{end}}
+<form method="post" action="/network/ap"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Zapnout servisní Wi-Fi</button></form>
+<form method="post" action="/network/uplink"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Vrátit se na uloženou Wi-Fi</button></form></section>
+{{end}}</main></body></html>
