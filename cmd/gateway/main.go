@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -45,9 +46,9 @@ func main() {
 	}
 }
 
-func run(args []string) error {
+func run(args []string) (runErr error) {
 	if len(args) == 0 {
-		return errors.New("usage: gateway init|certificate|serve|version")
+		return errors.New("usage: gateway init|password|certificate|serve|version")
 	}
 	if args[0] == "version" {
 		fmt.Println(version)
@@ -57,7 +58,7 @@ func run(args []string) error {
 	readyFD := flags.Int("launcher-ready-fd", 0, "Inherited launcher readiness pipe")
 	continueFD := flags.Int("launcher-continue-fd", 0, "Inherited launcher confirmation pipe")
 	dir := flags.String("data-dir", "/data/gateway", "Persistent state directory")
-	passwordFile := flags.String("password-file", "", "Read provisioning password from a private file (init only)")
+	passwordFile := flags.String("password-file", "", "Read provisioning password from a private file (init or password)")
 	adminAddress := flags.String("admin-address", "127.0.0.1:8443", "Explicit IPv4 address and port for HTTPS")
 	apAddress := flags.String("ap-admin-address", "", "Optional explicit service AP IPv4 address and port for HTTPS")
 	networkSocket := flags.String("network-socket", networkadmin.SocketPath, "Root network helper socket")
@@ -104,6 +105,40 @@ func run(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "password":
+		if *passwordFile == "" {
+			return errors.New("--password-file is required")
+		}
+		info, err := os.Lstat(*passwordFile)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+			return errors.New("password file must be private")
+		}
+		if info.Size() > 1026 {
+			return errors.New("password file exceeds limit")
+		}
+		password, err := os.ReadFile(*passwordFile)
+		if err != nil {
+			return err
+		}
+		hash, err := auth.Hash(strings.TrimRight(string(password), "\r\n"))
+		if err != nil {
+			return err
+		}
+		unlock, err := platform.Lock(*dir)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		store, err := state.Open(*dir)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		_, old, err := store.Identity()
+		if err != nil {
+			return err
+		}
+		return store.ChangePassword(context.Background(), old, hash)
 	case "certificate":
 		if !apListen.IsValid() {
 			return errors.New("--ap-admin-address is required")
@@ -214,6 +249,38 @@ func run(args []string) error {
 		if spool != nil {
 			defer spool.Close()
 		}
+		var panicked atomic.Bool
+		crash := func(d telemetry.Diagnostic) {
+			panicked.Store(true)
+			if spool != nil {
+				spool.PersistCrash(d)
+			}
+			stop()
+		}
+		defer telemetry.Recover(crash, func() { runErr = telemetry.ErrPanic })
+		defer func() {
+			if panicked.Load() {
+				runErr = telemetry.ErrPanic
+			}
+		}()
+		retentionStopped := make(chan struct{})
+		go func() {
+			defer close(retentionStopped)
+			defer telemetry.Recover(crash, nil)
+			ticker := time.NewTicker(time.Hour)
+			defer ticker.Stop()
+			for {
+				if err := s.Prune(ctx, time.Now()); err != nil && ctx.Err() == nil {
+					report("storage_recovery_failed")
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+		defer func() { stop(); <-retentionStopped }()
 		cfg, configured, err := cloud.LoadConfig(*dir)
 		if err != nil {
 			return err
@@ -242,6 +309,7 @@ func run(args []string) error {
 				return nil, err
 			}
 			client.OnState = observe
+			client.OnPanic = crash
 			if updater != nil {
 				client.OnOTA = updater.Notify
 			}
@@ -273,7 +341,7 @@ func run(args []string) error {
 				send = cloudManager.Report
 			}
 			eventStopped := make(chan struct{})
-			go func() { defer close(eventStopped); spool.Run(ctx, events, send) }()
+			go func() { defer close(eventStopped); defer telemetry.Recover(crash, nil); spool.Run(ctx, events, send) }()
 			defer func() { stop(); <-eventStopped }()
 		}
 		web, err := admin.New(s, *adminAddress, version)
@@ -283,6 +351,8 @@ func run(args []string) error {
 		if updater != nil {
 			web.OTA = updater
 		}
+		web.OnPanic = crash
+		web.Pool = pool
 		web.Network = networkadmin.NewClient(*networkSocket)
 		web.AdditionalHost = *apAddress
 		if *device != "" {
@@ -303,7 +373,7 @@ func run(args []string) error {
 		defer listener.Close()
 		defer server.Close()
 		result := make(chan error, 3)
-		go func() { result <- server.Serve(listener) }()
+		go func() { defer telemetry.Recover(crash, nil); result <- server.Serve(listener) }()
 		if apListen.IsValid() {
 			plainAP, e := platform.ListenFreebind(ctx, *apAddress)
 			if e != nil {
@@ -311,13 +381,14 @@ func run(args []string) error {
 			}
 			apListener := tls.NewListener(plainAP, server.TLSConfig)
 			defer apListener.Close()
-			go func() { result <- server.Serve(apListener) }()
+			go func() { defer telemetry.Recover(crash, nil); result <- server.Serve(apListener) }()
 		}
 		dhcpReady := make(chan struct{})
 		dhcpStopped := make(chan struct{})
 		if *device != "" {
 			go func() {
 				defer close(dhcpStopped)
+				defer telemetry.Recover(crash, nil)
 				result <- dhcp.Serve(ctx, *device, dhcp.Handler{Store: s, Pool: pool}, func(error) { report("dhcp_request_failed") }, func() { close(dhcpReady) })
 			}()
 		}
@@ -341,12 +412,12 @@ func run(args []string) error {
 		}
 		if updater != nil {
 			otaStopped := make(chan struct{})
-			go func() { defer close(otaStopped); updater.Run(ctx) }()
+			go func() { defer close(otaStopped); defer telemetry.Recover(crash, nil); updater.Run(ctx) }()
 			defer func() { stop(); <-otaStopped }()
 		}
 		cloudStopped := make(chan struct{})
 		if *device != "" {
-			go func() { defer close(cloudStopped); cloudManager.Run(ctx) }()
+			go func() { defer close(cloudStopped); defer telemetry.Recover(crash, nil); cloudManager.Run(ctx) }()
 		} else {
 			close(cloudStopped)
 		}

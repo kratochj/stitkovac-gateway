@@ -40,6 +40,8 @@ type AttemptSummary struct {
 	Port                                      int
 	CreatedAt, UpdatedAt, AcknowledgedAt      int64
 	Acknowledged                              bool
+	Resolution                                string
+	Resolved                                  bool
 }
 
 type HistoryPage struct {
@@ -63,7 +65,7 @@ func (s *Store) History(ctx context.Context, before int64, filter string) (Histo
 	}
 	query := `SELECT a.rowid,a.job_uid,a.attempt_id,a.mac,a.ip,a.port,a.state,a.reason,
  COALESCE(h.created_at,0),COALESCE(h.updated_at,0),COALESCE(h.acknowledged_at,0),
- (a.document IS NULL AND a.state IN ('SENT','FAILED','EXPIRED'))
+ EXISTS(SELECT 1 FROM attempt_delivery d WHERE d.job_uid=a.job_uid AND d.attempt_id=a.attempt_id AND d.acknowledged=1), COALESCE((SELECT decision FROM resolutions r WHERE r.job_uid=a.job_uid AND r.attempt_id=a.attempt_id),''), EXISTS(SELECT 1 FROM resolutions r WHERE r.job_uid=a.job_uid AND r.attempt_id=a.attempt_id AND r.acknowledged=1)
  FROM attempts a LEFT JOIN attempt_history h ON h.job_uid=a.job_uid AND h.attempt_id=a.attempt_id WHERE 1=1`
 	args := []any{}
 	if before != 0 {
@@ -83,7 +85,7 @@ func (s *Store) History(ctx context.Context, before int64, filter string) (Histo
 	page := HistoryPage{Attempts: []AttemptSummary{}}
 	for rows.Next() {
 		var a AttemptSummary
-		if err := rows.Scan(&a.Sequence, &a.JobUID, &a.AttemptID, &a.MAC, &a.IP, &a.Port, &a.State, &a.Reason, &a.CreatedAt, &a.UpdatedAt, &a.AcknowledgedAt, &a.Acknowledged); err != nil {
+		if err := rows.Scan(&a.Sequence, &a.JobUID, &a.AttemptID, &a.MAC, &a.IP, &a.Port, &a.State, &a.Reason, &a.CreatedAt, &a.UpdatedAt, &a.AcknowledgedAt, &a.Acknowledged, &a.Resolution, &a.Resolved); err != nil {
 			return HistoryPage{}, err
 		}
 		page.Attempts = append(page.Attempts, a)
@@ -97,6 +99,6 @@ func (s *Store) History(ctx context.Context, before int64, filter string) (Histo
 
 func (s *Store) UncertainCount(ctx context.Context) (int, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM attempts WHERE state='UNKNOWN'").Scan(&count)
+	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM attempts a WHERE state='UNKNOWN' AND NOT EXISTS(SELECT 1 FROM resolutions r WHERE r.job_uid=a.job_uid AND r.attempt_id=a.attempt_id AND r.acknowledged=1)").Scan(&count)
 	return count, err
 }

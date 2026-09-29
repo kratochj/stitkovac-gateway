@@ -102,3 +102,14 @@ aktivační grant a report však přežívají odpojení WSS session při drainu
 Stavy a přesná pravidla aktivačního grantu, podpisů a bootu jsou v
 [OTA implementaci](ota-implementation.md). Konečný úspěch znamená potvrzení
 lokálního health checku nové verze, nikdy pouhé stažení artefaktu.
+
+
+## Rozšíření provozní správy (připravené, nenasazené)
+
+`ready.inventoryProtocol = 1` vyjednává `PUT /inventory` a `POST /jobs/{uid}/resolve`.
+Snapshot obsahuje monotónní `revision` a `reservations` (MAC, IP, leaseUntil, lastSeen,
+declined, createdAt); odpověď potvrzuje stejnou revizi. Resolve obsahuje `attemptId`
+ a `decision` (`output_checked` / `discarded`). Obojí vyžaduje aktuální session.
+Claim nově obsahuje `state`: při STARTED bez bezpečné lokální evidence agent nesmí
+rekonstruovat přenos; EXPIRED nepokračuje downloadem. Detaily a retence jsou v
+[provozním kontraktu](printer-operations.md).

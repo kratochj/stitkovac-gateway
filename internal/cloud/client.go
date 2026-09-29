@@ -35,16 +35,18 @@ type Client struct {
 	worker                   *printing.Worker
 	report                   func(string)
 	OnState                  func(string)
+	OnPanic                  func(telemetry.Diagnostic)
 	OnOTA                    func(ota.Remote)
 }
 type envelope struct {
-	Version      int    `json:"version"`
-	Type         string `json:"type"`
-	MessageID    string `json:"messageId"`
-	SessionID    string `json:"sessionId,omitempty"`
-	GatewayID    string `json:"gatewayId,omitempty"`
-	AgentVersion string `json:"agentVersion,omitempty"`
-	OTAProtocol  int    `json:"otaProtocol,omitempty"`
+	Version           int    `json:"version"`
+	Type              string `json:"type"`
+	MessageID         string `json:"messageId"`
+	SessionID         string `json:"sessionId,omitempty"`
+	GatewayID         string `json:"gatewayId,omitempty"`
+	AgentVersion      string `json:"agentVersion,omitempty"`
+	InventoryProtocol int    `json:"inventoryProtocol,omitempty"`
+	OTAProtocol       int    `json:"otaProtocol,omitempty"`
 }
 type page struct {
 	Jobs       []string `json:"jobs"`
@@ -145,6 +147,28 @@ func (c *Client) syncJobs(ctx context.Context, session string) error {
 			if a.JobUID != uid || !safeID.MatchString(a.AttemptID) {
 				return errors.New("invalid cloud claim")
 			}
+			if a.State == "STARTED" {
+				if err := c.worker.Store.RememberRemoteStart(ctx, a); err != nil {
+					return err
+				}
+				current, err := c.worker.Store.Attempt(ctx, a.JobUID, a.AttemptID)
+				if err != nil {
+					return err
+				}
+				if err = (sessionCloud{c, session}).Result(ctx, current); err != nil {
+					return err
+				}
+				if err = c.worker.Store.Acknowledge(ctx, a.JobUID, a.AttemptID, current.State); err != nil {
+					return err
+				}
+				continue
+			}
+			if a.State == "EXPIRED" {
+				if err := c.worker.Store.ServerExpired(ctx, a.JobUID, a.AttemptID); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := c.request(ctx, "GET", "/jobs/"+uid+"/document?attemptId="+url.QueryEscape(a.AttemptID), session, nil, &a.Document); err != nil {
 				return err
 			}
@@ -162,6 +186,7 @@ func (c *Client) syncJobs(ctx context.Context, session string) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				defer telemetry.Recover(c.OnPanic, func() { fail <- telemetry.ErrPanic })
 				select {
 				case limit <- struct{}{}:
 					defer func() { <-limit }()
@@ -215,7 +240,7 @@ func (c *Client) Session(parent context.Context) error {
 	if c.OnOTA != nil {
 		protocol = 1
 	}
-	hello, _ := json.Marshal(envelope{OTAProtocol: protocol, Version: 1, Type: "hello", MessageID: state.ID(), GatewayID: c.id, AgentVersion: c.version})
+	hello, _ := json.Marshal(envelope{InventoryProtocol: 1, OTAProtocol: protocol, Version: 1, Type: "hello", MessageID: state.ID(), GatewayID: c.id, AgentVersion: c.version})
 	if err := conn.Write(ctx, websocket.MessageText, hello); err != nil {
 		return err
 	}
@@ -242,6 +267,7 @@ func (c *Client) Session(parent context.Context) error {
 	workers.Add(3)
 	go func() {
 		defer workers.Done()
+		defer telemetry.Recover(c.OnPanic, func() { fail <- telemetry.ErrPanic })
 		for {
 			kind, b, err := conn.Read(ctx)
 			if err != nil {
@@ -266,11 +292,25 @@ func (c *Client) Session(parent context.Context) error {
 	}()
 	go func() {
 		defer workers.Done()
+		defer telemetry.Recover(c.OnPanic, func() { fail <- telemetry.ErrPanic })
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-c.worker.Store.Changes():
+				if ready.InventoryProtocol == 1 {
+					select {
+					case wake <- struct{}{}:
+					default:
+					}
+				}
 			case <-wake:
+				if ready.InventoryProtocol == 1 {
+					if err := c.syncOperations(ctx, ready.SessionID); err != nil {
+						fail <- err
+						return
+					}
+				}
 				if err := c.syncJobs(ctx, ready.SessionID); err != nil {
 					fail <- err
 					return
@@ -280,6 +320,7 @@ func (c *Client) Session(parent context.Context) error {
 	}()
 	go func() {
 		defer workers.Done()
+		defer telemetry.Recover(c.OnPanic, func() { fail <- telemetry.ErrPanic })
 		ticker := time.NewTicker(20 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -309,6 +350,7 @@ func (c *Client) Session(parent context.Context) error {
 }
 
 func (c *Client) Run(ctx context.Context) {
+	defer telemetry.Recover(c.OnPanic, nil)
 	delay := time.Second
 	failures := 0
 	for ctx.Err() == nil {

@@ -94,6 +94,14 @@ func TestSpringBackend(t *testing.T) {
 	<-done
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	pending, err := s.PendingResults(context.Background())
+	if err != nil || len(pending) != 0 {
+		t.Fatal("lost acknowledgement left local data pending", err)
+	}
+	revision, acknowledged, err := s.InventoryStatus(context.Background())
+	if err != nil || revision != acknowledged {
+		t.Fatal("real server did not acknowledge inventory", err)
+	}
 	if !bytes.Equal(p.data.Bytes(), []byte("%PDF-test")) {
 		t.Fatal("missing or duplicate printer write")
 	}

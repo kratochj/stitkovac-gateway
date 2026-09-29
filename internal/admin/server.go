@@ -18,6 +18,7 @@ import (
 	"github.com/kratochj/stitkovac-gateway/internal/ota"
 	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
+	"github.com/kratochj/stitkovac-gateway/internal/telemetry"
 )
 
 //go:embed templates/*.html static/*
@@ -29,6 +30,8 @@ type session struct {
 	Probe   *printing.ProbeResult
 }
 type Server struct {
+	Pool    state.Pool
+	OnPanic func(telemetry.Diagnostic)
 	OTA     interface{ Status() ota.Report }
 	Network interface {
 		Status(context.Context) (network.Status, error)
@@ -69,12 +72,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /login", s.login)
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.HandleFunc("POST /cloud", s.configureCloud)
+	mux.HandleFunc("POST /access/password", s.changePassword)
+	mux.HandleFunc("POST /printers/reservation", s.readdressPrinter)
+	mux.HandleFunc("POST /jobs/resolve", s.resolveAttempt)
 	mux.HandleFunc("POST /printers/check", s.probePrinter)
 	mux.HandleFunc("GET /jobs", s.history)
 	mux.HandleFunc("GET /network", s.networkPage)
 	mux.HandleFunc("POST /network/{action}", s.configureNetwork)
 	mux.HandleFunc("GET /{$}", s.index)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer telemetry.Recover(s.OnPanic, func() { http.Error(w, "Vnitřní chyba brány. Služba se obnovuje.", 500) })
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		// no-referrer makes browser form POSTs send Origin: null, including our own login.
@@ -115,13 +122,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	s.nextLogin = time.Now().Add(2 * time.Second)
 	s.loginBusy = true
+	passwordHash := s.passwordHash
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); s.loginBusy = false; s.mu.Unlock() }()
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Neplatný formulář.", http.StatusBadRequest)
 		return
 	}
-	if !auth.Verify(s.passwordHash, r.Form.Get("password")) {
+	if !auth.Verify(passwordHash, r.Form.Get("password")) {
 		w.WriteHeader(http.StatusUnauthorized)
 		s.render(w, "login.html", map[string]string{"Error": "Nesprávné heslo."})
 		return
@@ -241,19 +249,25 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, cloudError st
 		status := s.OTA.Status()
 		otaStatus = &status
 	}
+	revision, acknowledged, err := s.Store.InventoryStatus(r.Context())
+	if err != nil {
+		http.Error(w, "Stav synchronizace není dostupný.", 503)
+		return
+	}
 	s.render(w, "index.html", struct {
-		OTA               *ota.Report
-		ID, Version, CSRF string
-		Now               int64
-		Devices           []state.Reservation
-		Cloud             *cloud.Status
-		CloudError        string
-		CloudSaved        bool
-		PrinterChecks     bool
-		Probe             *printing.ProbeResult
-		Uncertain         int
+		InventoryRevision, InventoryAcknowledged int64
+		OTA                                      *ota.Report
+		ID, Version, CSRF                        string
+		Now                                      int64
+		Devices                                  []state.Reservation
+		Cloud                                    *cloud.Status
+		CloudError                               string
+		CloudSaved                               bool
+		PrinterChecks                            bool
+		Probe                                    *printing.ProbeResult
+		Uncertain                                int
 	}{
-		OTA: otaStatus, ID: s.gatewayID, Version: s.Version, CSRF: v.CSRF, Now: time.Now().Unix(), Devices: reservations,
+		InventoryRevision: revision, InventoryAcknowledged: acknowledged, OTA: otaStatus, ID: s.gatewayID, Version: s.Version, CSRF: v.CSRF, Now: time.Now().Unix(), Devices: reservations,
 		Cloud: connection, CloudError: cloudError, CloudSaved: r.URL.Query().Get("cloud") == "saved",
 		PrinterChecks: s.TestPrinter != nil, Probe: v.Probe, Uncertain: uncertain,
 	})
