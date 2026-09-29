@@ -81,7 +81,7 @@ func Initialize(dir, passwordHash string) (*Store, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec(schema); err == nil {
+	if _, err = tx.Exec(schema + historySchema); err == nil {
 		_, err = tx.Exec("INSERT INTO identity(singleton, gateway_id, password_hash) VALUES (1, ?, ?)", ID(), passwordHash)
 	}
 	if err == nil {
@@ -130,6 +130,19 @@ func Open(dir string) (*Store, error) {
 	}
 	if err == nil {
 		_, _, err = s.Identity()
+	}
+	if err == nil {
+		// Additive metadata preserves compatibility with earlier journal-v1 agents.
+		var tx *sql.Tx
+		tx, err = s.db.BeginTx(context.Background(), nil)
+		if err == nil {
+			_, err = tx.Exec(historySchema)
+			if err == nil {
+				err = tx.Commit()
+			} else {
+				tx.Rollback()
+			}
+		}
 	}
 	if err != nil {
 		s.Close()

@@ -32,8 +32,7 @@ func (w *Worker) Process(ctx context.Context, a state.Attempt, cloud Cloud) erro
 		return errors.New("printer target outside configured network")
 	}
 	address := net.JoinHostPort(a.IP, strconv.Itoa(a.Port))
-	lock, _ := w.locks.LoadOrStore(address, make(chan struct{}, 1))
-	gate := lock.(chan struct{})
+	gate := w.endpointGate(address)
 	select {
 	case gate <- struct{}{}:
 		defer func() { <-gate }()
@@ -102,4 +101,9 @@ func (w *Worker) send(ctx context.Context, address string, document []byte) stri
 		document = document[n:]
 	}
 	return "SENT"
+}
+
+func (w *Worker) endpointGate(address string) chan struct{} {
+	lock, _ := w.locks.LoadOrStore(address, make(chan struct{}, 1))
+	return lock.(chan struct{})
 }

@@ -131,3 +131,14 @@ func changed(result sql.Result, err error) error {
 	}
 	return nil
 }
+
+// Reservation resolves only an existing normalized MAC; callers never choose an IP.
+func (s *Store) Reservation(ctx context.Context, raw string) (Reservation, error) {
+	mac, err := MAC(raw)
+	if err != nil {
+		return Reservation{}, err
+	}
+	r := Reservation{MAC: mac}
+	err = s.db.QueryRowContext(ctx, "SELECT ip,created_at,last_seen,lease_until,declined FROM reservations WHERE mac=?", mac).Scan(&r.IP, &r.CreatedAt, &r.LastSeen, &r.LeaseUntil, &r.Declined)
+	return r, err
+}
