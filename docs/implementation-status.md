@@ -29,7 +29,8 @@ zatím nemá nastavený vzdálený Git repozitář.
 Podrobnosti: [nasazení serveru](server-deployment-2.7.12.md),
 [OTA implementace a produkční aktivace](ota-implementation.md).
 Testovací build a jeho omezení: [VirtualBox laboratoř](virtualbox-lab.md).
-Agent 0.1.4: [síťová administrace a instalační postup](network-administration.md).
+Agent **0.1.5** je nasazený v testovací VM přes podepsaný OTA launcher
+s laboratorním klíčem. [Síťová administrace a instalační postup](network-administration.md).
 Předchozí celek: [historie a diagnostika tisku](print-diagnostics.md); současná VM
 je aktualizovaná při zachování nastaveného serveru a tokenu.
 

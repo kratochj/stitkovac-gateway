@@ -1,0 +1,105 @@
+---
+# Install the launcher on an existing private lab without changing cloud credentials.
+- name: Provision OTA on the existing VirtualBox lab
+  hosts: gateways
+  become: true
+  gather_facts: true
+  vars:
+    ansible_remote_tmp: /tmp
+    gateway_launcher_binary: "{{ playbook_dir }}/../../bin/gateway-launcher-linux-arm64"
+    gateway_update_binary: "{{ playbook_dir }}/../../bin/gateway-update-linux-arm64"
+    gateway_release_repository: https://cloud.stitkovac.app
+  tasks:
+    - name: Require the isolated lab
+      ansible.builtin.command:
+        argv: [systemctl, is-active, gateway-lab-network]
+      changed_when: false
+
+    - name: Record cloud configuration without exposing it
+      ansible.builtin.stat:
+        path: /data/gateway/cloud.json
+        checksum_algorithm: sha256
+      register: cloud_before
+      no_log: true
+
+    - name: Require idle printing
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import sqlite3
+            db = sqlite3.connect('file:/data/gateway/gateway.db?mode=ro', uri=True)
+            assert db.execute("SELECT count(*) FROM attempts WHERE state IN ('CLAIMED','SENDING')").fetchone()[0] == 0, 'Printing is active'
+      changed_when: false
+
+    - name: Install with a guaranteed return to read-only storage
+      block:
+        - name: Stop the agent before changing its launcher
+          ansible.builtin.systemd_service:
+            name: stitkovac-gateway
+            state: stopped
+
+        - name: Temporarily allow system installation
+          ansible.builtin.command:
+            argv: [mount, -o, 'remount,rw', /]
+          changed_when: true
+
+        - name: Apply shared offline OTA provisioning
+          ansible.builtin.include_tasks: ../ansible/tasks/ota.yml
+      always:
+        - name: Flush installation changes
+          ansible.builtin.command: sync
+          changed_when: false
+
+        - name: Restore read-only root
+          ansible.builtin.command:
+            argv: [mount, -o, 'remount,ro', /]
+          changed_when: true
+
+        - name: Verify storage protection before starting
+          ansible.builtin.command: /usr/lib/stitkovac-gateway/check-storage
+          changed_when: false
+
+        - name: Start the agent with preserved settings
+          ansible.builtin.systemd_service:
+            name: stitkovac-gateway
+            daemon_reload: true
+            state: started
+
+    - name: Verify cloud configuration remained unchanged
+      ansible.builtin.stat:
+        path: /data/gateway/cloud.json
+        checksum_algorithm: sha256
+      register: cloud_after
+      no_log: true
+
+    - name: Assert preservation of cloud credentials
+      ansible.builtin.assert:
+        that:
+          - cloud_before.stat.exists == cloud_after.stat.exists
+          - cloud_before.stat.checksum | default('') == cloud_after.stat.checksum | default('')
+      no_log: true
+
+    - name: Verify local HTTPS startup
+      ansible.builtin.uri:
+        url: https://127.0.0.1:8443/login
+        validate_certs: false
+        status_code: 200
+      register: ota_health
+      until: ota_health.status | default(0) == 200
+      retries: 20
+      delay: 2
+
+    - name: Inspect verified release selection
+      become_user: stitkovac-gateway
+      ansible.builtin.command:
+        argv: [/usr/lib/stitkovac-gateway/gateway-update, status]
+      changed_when: false
+      register: ota_status
+
+    - name: Require a confirmed release
+      ansible.builtin.assert:
+        that:
+          - (ota_status.stdout | from_json).active == gateway_release_version
+          - not ((ota_status.stdout | from_json).trial | default(false))

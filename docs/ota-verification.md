@@ -2,7 +2,9 @@
 
 Datum: 2026-09-29. Změny jsou lokální na větvích `feat/gateway-foundation`
 (gateway) a `feat/gateway-ota` (server). Produkční server ani stávající
-VirtualBox VM nebyly při této práci aktualizované.
+VirtualBox VM nebyly při původní implementaci aktualizované. Následné
+[nasazení 0.1.5 do VM](virtualbox-lab.md#ota-launcher-015) již ověřilo skutečný
+Ansible provisioning, podepsaný start, izolovaný rollback a webovou diagnostiku.
 
 ## Provedené kontroly
 

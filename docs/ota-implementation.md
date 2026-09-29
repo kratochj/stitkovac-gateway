@@ -13,8 +13,9 @@ Produkční aktivace vyžaduje vydat novou serverovou verzi, nastavit skutečné
 podpisové klíče a publisher credential, připojit gateway repozitář ke GitHubu
 s chráněným release prostředím a provisionovat brány. V této implementaci
 nevznikl produkční klíč, nebyl nasazen server ani upravena zákaznická konfigurace
-stávající VM. VM dál používá agenta 0.1.4 bez launcheru. Tyto provozní kroky
-nejsou nahrazeny úspěšnými lokálními testy.
+stávající VM. Následně byla testovací VM aktualizovaná na 0.1.5 s launcherem
+a samostatným laboratorním klíčem; viz [nasazení do VM](virtualbox-lab.md#ota-launcher-015).
+Produkční aktivace tím není nahrazená.
 
 ## Průběh nasazení
 

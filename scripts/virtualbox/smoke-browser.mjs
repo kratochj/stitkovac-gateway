@@ -24,6 +24,12 @@ try {
   assert.equal(origin, base, 'The browser must retain the same origin on form submission');
   await page.waitForURL(base + '/');
   assert.match(await page.locator('body').innerText(), /DHCP rezervace/);
+  if (process.argv.includes('--ota')) {
+    assert.match(await page.locator('section[aria-labelledby="ota-title"]').innerText(), /Vzdálené aktualizace jsou připravené/);
+    assert.match(await page.locator('#cloud-state').innerText(), /Připojeno k serveru/);
+    assert.equal(await page.locator('#token').inputValue(), '');
+    console.log('OTA readiness and the existing cloud connection passed.');
+  }
   if (process.argv.includes('--configure-lab')) {
     // Never replace a real server's settings as a side effect of this lab test.
     assert.equal(await page.locator('#server_url').inputValue(), 'https://127.0.0.1:9443');

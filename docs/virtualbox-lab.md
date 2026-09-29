@@ -4,7 +4,7 @@ Připraveno a ověřeno 2026-09-29 na MacBooku s Apple Silicon, macOS 26.4.1
 a VirtualBoxem 7.2.4. VM používá Debian 13 ARM64, 2 CPU, 2 GB RAM,
 8GB systémový a 2GB datový disk. Tento obraz není pro Intel Mac.
 
-Aktuálně registrovaná VM používá agenta **0.1.4** se [síťovou administrací
+Aktuálně registrovaná VM používá podepsaného agenta **0.1.5** přes OTA launcher se [síťovou administrací
 a její simulací](network-administration.md) a [diagnostikou tisku](print-diagnostics.md). Existující OVA z předchozího exportu obsahuje
 **0.1.2**. Nový export z aktuální VM nebyl vytvořen; zachovává se její nastavené
 připojení k serveru. Sestavení nové čisté laboratoře ze zdrojů používá 0.1.4.
@@ -62,8 +62,9 @@ přijaté bajty do `/data/lab/prints`; netiskne na fyzickém zařízení.
 Stejný ARM64 agent jako pro Raspberry Pi používá skutečný WSS transport,
 claim/download/start/result protokol, journal a TCP socket. Lokální pomocný
 server nahrazuje produkční Štítkovač a generuje dvě malá testovací PDF.
-Produkční účet, token ani Rollbar nejsou v této VM nastavené. Diagnostické
-události přijímá pouze lokální simulátor.
+Čistý export OVA nemá produkční účet ani token. Aktuálně registrovaná VM už
+má vlastní připojení k produkčnímu serveru; jeho token se při aktualizaci
+zachovává a tato VM se nesmí použít jako distribuční export.
 
 Základní systém a EFI jsou připojené read-only. `/data` je samostatné ext4,
 dočasné soubory a systémové logy jsou v RAM. Po vypnutí tedy systémové logy
@@ -118,7 +119,8 @@ Simulátor uchovává nejvýše 100 úloh a posledních 50 zachycených dokument
 `SENT` znamená úspěšné předání bajtů TCP simulátoru, ne důkaz fyzického tisku.
 Tento test neověřuje Wi-Fi/AP, kompatibilitu Honeywell PC42E, SD kartu,
 skutečné odpojení napájení Raspberry Pi ani výpadek uprostřed fyzického tisku.
-Síťová administrace a kompletní serverové OTA jsou stále rozpracované.
+Síťová administrace používá simulaci rádia. OTA launcher je ve VM nasazený;
+serverová OTA část zatím není v produkci.
 
 ## Export a opětovný import
 
@@ -162,8 +164,54 @@ má syntaktickou kontrolu, druhé kompletní sestavení od nuly neproběhlo.
 
 ## Síťová administrace 0.1.4
 
-Současná VM je aktualizovaná na 0.1.4. Stránka **Síť** obsahuje explicitně
+Síťová administrace byla nasazená ve verzi 0.1.4. Stránka **Síť** obsahuje explicitně
 označenou simulaci Wi-Fi a AP. Skutečný NAT, tiskárna a cloudové přístupy zůstávají
 zachované. Detaily a opakovatelný instalační/testovací postup jsou v
 [síťové administraci](network-administration.md). Existující export OVA 0.1.2
 se nemění; aktualizovaná VM s vlastním cloudovým tokenem se neexportovala.
+
+
+## OTA launcher 0.1.5
+
+Dne 2026-09-29 byl na existující VM nasazen podepsaný agent **0.1.5**, launcher
+protokolu 2 a updater. Aplikace běží z `/data/gateway-releases/0.1.5/gateway`.
+Původní přímá binárka na systémovém oddílu není aktivní. Identita, heslo,
+cloudový token, tiskový journal, DHCP rezervace a síťová simulace zůstaly zachované.
+
+Veřejný testovací klíč `virtualbox-lab-20260929` je v systémovém souboru
+`/etc/stitkovac-gateway/release-keys.json`. Soukromý klíč zůstává výhradně
+na Macu v ignorovaném `dist/virtualbox/ota/lab-signing.pem`; není to produkční
+podpisový klíč. Podepsané vydání, veřejné klíče a instalační parametry jsou
+ve stejné privátní složce. Existující OVA 0.1.2 se nemění.
+
+Opakování provisioningu stejného vydání, z kořene projektu:
+
+```sh
+ANSIBLE_LOCAL_TEMP=/tmp/stitkovac-ansible ANSIBLE_PIPELINING=True \
+  ansible-playbook -i deploy/virtualbox/inventory.yml deploy/virtualbox/ota.yml \
+  -e @dist/virtualbox/ota/provision.json
+```
+
+Playbook nejprve ověří laboratoř a klidný tisk, zastaví agenta, dočasně přepne
+root do zápisu a použije společné OTA úlohy. V bloku `always` obnoví read-only
+root a službu. Kontroluje nezměněný checksum cloudové konfigurace bez výpisu
+obsahu, HTTPS startup a potvrzený výběr verze. Opakovaný provisioning nemění
+aktivní výběr existující instalace; pro další vydání použijte OTA příkaz.
+
+Ověřeno na skutečné VM:
+
+- Podepsaný start 0.1.5 přes launcher a opakovaný Ansible provisioning.
+- Restart celé VM: všechny služby aktivní, žádné failed units, potvrzená verze
+  0.1.5, storage guard a následná webová diagnostika znovu prošly.
+- Přihlášení, připravenost OTA, připojení k původnímu serveru, TCP diagnostika
+  simulované tiskárny, historie a mobilní zobrazení (`smoke-browser.mjs --ota --diagnostics`).
+- Automatický návrat po záměrně chybné verzi v podepsaném manifestu.
+  `smoke-ota-guest.sh` používá samostatný network namespace a dočasný privátní
+  adresář na `/data`; nemění běžící službu, její databázi ani aktivní vydání.
+  Testovací manifest 9.9.9 není skutečné vydání a nesmí se publikovat.
+
+Repository origin je připravený na `https://cloud.stitkovac.app`, ale produkční
+server 2.7.12 zatím nemá nové OTA endpointy ani tento testovací veřejný klíč.
+Z jeho administrace tedy ještě nelze poslat aktualizaci. Lokální simulátor
+na portu 9443 také OTA rollout neimplementuje. Nasazení do VM ověřuje klienta,
+podpis a launcher; není to nový end-to-end test serverového OTA rollout procesu.
