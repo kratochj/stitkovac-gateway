@@ -18,7 +18,7 @@ if [ ! -f ".cache/virtualbox/$image" ]; then
         --output ".cache/virtualbox/$image.partial"
     mv ".cache/virtualbox/$image.partial" ".cache/virtualbox/$image"
 fi
-make VERSION=0.1.2 lab-arm64
+make VERSION=0.1.3 lab-arm64
 python3 scripts/virtualbox/create.py
 python3 - <<'PY'
 import json, secrets, subprocess, time

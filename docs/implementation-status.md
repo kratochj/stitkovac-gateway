@@ -14,6 +14,7 @@ zatím nemá nastavený vzdálený Git repozitář.
 | Persistence | SQLite WAL/FULL, odmítnutí chybějícího úložiště, obnova po ukončení procesu bez cleanupu |
 | DHCP | MAC rezervace před OFFER, lease před ACK, RELEASE bez ztráty rezervace, DECLINE karanténa |
 | Servisní web | HTTPS login/logout, CSRF/Origin/Host ochrany, limit přihlašování, přehled rezervací, nastavení adresy serveru a tokenu, stav WSS připojení |
+| Diagnostika tisku | Historie po 50 pokusech, filtr stavu, časy a potvrzení serverem, upozornění na UNKNOWN, TCP test aktivní rezervace bez odeslání dat a bez souběhu s tiskem |
 | Cloud | WSS handshake, heartbeat, reconnect, událostmi spouštěná synchronizace, HTTPS transport bez redirectů |
 | Tisk | Ověření checksumu, journal před TCP zápisem, max. čtyři endpointy, detekce nejistého výsledku |
 | Chyby | Oddělená omezená SQLite fronta, allowlist bez raw errors, opakované předání serverovému relay |
@@ -26,6 +27,8 @@ zatím nemá nastavený vzdálený Git repozitář.
 Podrobnosti: [nasazení serveru](server-deployment-2.7.12.md),
 [OTA implementace a zbývající části](ota-implementation.md).
 Testovací build a jeho omezení: [VirtualBox laboratoř](virtualbox-lab.md).
+Agent 0.1.3: [historie a diagnostika tisku](print-diagnostics.md); současná VM
+je aktualizovaná při zachování nastaveného serveru a tokenu.
 
 ## Navazující implementační celky
 

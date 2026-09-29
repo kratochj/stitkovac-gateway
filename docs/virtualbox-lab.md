@@ -4,6 +4,11 @@ Připraveno a ověřeno 2026-09-29 na MacBooku s Apple Silicon, macOS 26.4.1
 a VirtualBoxem 7.2.4. VM používá Debian 13 ARM64, 2 CPU, 2 GB RAM,
 8GB systémový a 2GB datový disk. Tento obraz není pro Intel Mac.
 
+Aktuálně registrovaná VM používá agenta **0.1.3** s [historií a diagnostikou
+tisku](print-diagnostics.md). Existující OVA z předchozího exportu obsahuje
+**0.1.2**. Nový export z aktuální VM nebyl vytvořen; zachovává se její nastavené
+připojení k serveru. Sestavení nové čisté laboratoře ze zdrojů používá 0.1.3.
+
 ## Spuštění připraveného buildu
 
 VM **Stitkovac Gateway Lab** je na tomto Macu už zaregistrovaná.
@@ -105,6 +110,9 @@ GATEWAY_TEST_CHROMIUM=/absolute/path/to/chromium node scripts/virtualbox/smoke-b
 Volba `--configure-lab` navíc ověří odmítnutí neplatného tokenu, uložení správného
 tokenu, obnovení WSS spojení a ponechání tokenu při prázdném poli. Použijte ji
 pouze proti lokálnímu simulátoru; test odmítne přepsat konfiguraci jiného serveru.
+
+Volba `--diagnostics` ověřuje historii, filtr, mobilní zobrazení a TCP spojení
+se simulovanou tiskárnou. Cloudovou konfiguraci nemění a neodesílá tisková data.
 
 Simulátor uchovává nejvýše 100 úloh a posledních 50 zachycených dokumentů.
 `SENT` znamená úspěšné předání bajtů TCP simulátoru, ne důkaz fyzického tisku.

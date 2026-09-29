@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/kratochj/stitkovac-gateway/internal/auth"
 	"github.com/kratochj/stitkovac-gateway/internal/cloud"
+	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
 )
 
@@ -22,10 +24,14 @@ var assets embed.FS
 type session struct {
 	CSRF    string
 	Expires time.Time
+	Probe   *printing.ProbeResult
 }
 type Server struct {
-	Store *state.Store
-	Cloud interface {
+	Store       *state.Store
+	TestPrinter func(context.Context, string) printing.ProbeResult
+	probeBusy   bool
+	nextProbe   time.Time
+	Cloud       interface {
 		Status() cloud.Status
 		Save(string, string) error
 	}
@@ -53,6 +59,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /login", s.login)
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.HandleFunc("POST /cloud", s.configureCloud)
+	mux.HandleFunc("POST /printers/check", s.probePrinter)
+	mux.HandleFunc("GET /jobs", s.history)
 	mux.HandleFunc("GET /{$}", s.index)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -78,7 +86,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
-	t := template.Must(template.ParseFS(assets, "templates/"+name))
+	t := template.Must(template.New(name).Funcs(template.FuncMap{"formatTime": formatTime, "attemptLabel": attemptLabel, "attemptMessage": attemptMessage, "probeMessage": probeMessage}).ParseFS(assets, "templates/"+name))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := t.Execute(w, data); err != nil {
 		return
@@ -211,6 +219,11 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, cloudError st
 		}
 		connection = &status
 	}
+	uncertain, err := s.Store.UncertainCount(r.Context())
+	if err != nil {
+		http.Error(w, "Evidence úloh není dostupná. Zkontrolujte datové úložiště.", http.StatusServiceUnavailable)
+		return
+	}
 	s.render(w, "index.html", struct {
 		ID, Version, CSRF string
 		Now               int64
@@ -218,5 +231,12 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, cloudError st
 		Cloud             *cloud.Status
 		CloudError        string
 		CloudSaved        bool
-	}{s.gatewayID, s.Version, v.CSRF, time.Now().Unix(), reservations, connection, cloudError, r.URL.Query().Get("cloud") == "saved"})
+		PrinterChecks     bool
+		Probe             *printing.ProbeResult
+		Uncertain         int
+	}{
+		ID: s.gatewayID, Version: s.Version, CSRF: v.CSRF, Now: time.Now().Unix(), Devices: reservations,
+		Cloud: connection, CloudError: cloudError, CloudSaved: r.URL.Query().Get("cloud") == "saved",
+		PrinterChecks: s.TestPrinter != nil, Probe: v.Probe, Uncertain: uncertain,
+	})
 }

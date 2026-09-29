@@ -56,6 +56,37 @@ try {
     await page.screenshot({ path: new URL('../../dist/virtualbox/cloud-settings.png', import.meta.url).pathname, fullPage: true });
     console.log('Credential rejection, replacement, reconnect and blank-token retention passed.');
   }
+  if (process.argv.includes('--diagnostics')) {
+    const originalServer = await page.locator('#server_url').inputValue();
+    const printer = page.locator('form[action="/printers/check"]').filter({
+      has: page.locator('input[name="mac"][value="02:77:00:00:00:01"]'),
+    });
+    assert.equal(await printer.count(), 1, 'Expected the isolated lab printer');
+    const checked = page.waitForResponse(r => r.url() === base + '/printers/check' && r.request().method() === 'POST');
+    await printer.locator('button').click();
+    assert.equal((await checked).status(), 303);
+    await page.waitForURL(base + '/#printers');
+    assert.match(await page.locator('.probe-result').innerText(), /TCP port 9100 je dostupný/);
+    assert.equal(await page.locator('#server_url').inputValue(), originalServer);
+    await page.screenshot({ path: new URL('../../dist/virtualbox/printer-diagnostics.png', import.meta.url).pathname, fullPage: true });
+    await page.goto(base + '/jobs');
+    assert.equal(await page.locator('h1').innerText(), 'Tiskové úlohy');
+    assert((await page.locator('table.history tbody tr').count()) <= 50);
+    await page.locator('#state').selectOption('UNKNOWN');
+    await page.locator('.history-filter button').click();
+    await page.waitForURL(base + '/jobs?state=UNKNOWN');
+    assert.equal(await page.locator('#state').inputValue(), 'UNKNOWN');
+    await page.goto(base + '/jobs');
+    await page.screenshot({ path: new URL('../../dist/virtualbox/print-history.png', import.meta.url).pathname, fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'History overflows mobile viewport');
+    const resultCell = await page.locator('table.history tbody tr:first-child td:last-child').boundingBox();
+    assert(resultCell && resultCell.x + resultCell.width <= 390, 'Print result is offscreen on mobile');
+    await page.screenshot({ path: new URL('../../dist/virtualbox/print-history-mobile.png', import.meta.url).pathname, fullPage: true });
+    await page.goto(base + '/');
+    assert.equal(await page.locator('#server_url').inputValue(), originalServer);
+    console.log('Printer probe, history, state filter and mobile layout passed without changing cloud settings.');
+  }
   const logoutResponse = page.waitForResponse(r => r.url() === base + '/logout' && r.request().method() === 'POST');
   await page.locator('form[action="/logout"] button').click();
   assert.equal((await logoutResponse).status(), 303, 'Browser logout must succeed');
