@@ -27,6 +27,7 @@ Chyby se hlásí do Rollbaru přes server Štítkovače.
 - HTTPS servisní přihlášení s Argon2id a přehled nalezených zařízení.
 - Odchozí WSS, obnovování spojení, HTTPS claim/download/start/result a RAW TCP tisk.
 - Omezená trvalá fronta očištěných chyb pro serverový Rollbar relay.
+- Podepsaná vydání, trvalý výběr verze, launcher s readiness a automatickým rollbackem.
 - ARM64 build, systemd služba, Ansible bootstrap/diagnostika a sestavení `.deb` na Linuxu.
 
 ## Vývoj
@@ -54,6 +55,7 @@ Linux; lokální příkaz bez dalších parametrů nespouští DHCP ani cloudov�
 Další informace:
 
 - [Stav implementace a zbývající práce](docs/implementation-status.md).
+- [Stav aplikačního OTA a launcheru](docs/ota-implementation.md).
 - [Instalace a bezpečný pilot](docs/installation.md).
 - [Gateway API v1](docs/protocol-v1.md).
 - [Rozhodnutí o DHCP backendu](docs/adr-001-dhcp.md).

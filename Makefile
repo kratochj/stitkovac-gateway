@@ -11,6 +11,10 @@ check:
 
 build:
 	$(GO) build -trimpath -ldflags '-X main.version=$(VERSION)' -o bin/gateway ./cmd/gateway
+	$(GO) build -trimpath -o bin/gateway-launcher ./cmd/gateway-launcher
+	$(GO) build -trimpath -o bin/gateway-update ./cmd/gateway-update
 
 arm64:
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags '-X main.version=$(VERSION)' -o bin/gateway-linux-arm64 ./cmd/gateway
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o bin/gateway-launcher-linux-arm64 ./cmd/gateway-launcher
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o bin/gateway-update-linux-arm64 ./cmd/gateway-update

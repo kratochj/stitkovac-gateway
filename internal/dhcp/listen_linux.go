@@ -12,7 +12,7 @@ import (
 )
 
 // Serve binds the socket to the configured printer interface, never the uplink.
-func Serve(ctx context.Context, device string, h Handler, report func(error)) error {
+func Serve(ctx context.Context, device string, h Handler, report func(error), ready func()) error {
 	iface, err := net.InterfaceByName(device)
 	if err != nil {
 		return err
@@ -52,6 +52,9 @@ func Serve(ctx context.Context, device string, h Handler, report func(error)) er
 		return err
 	}
 	defer conn.Close()
+	if ready != nil {
+		ready()
+	}
 	go func() { <-ctx.Done(); conn.Close() }()
 	b := make([]byte, 1501)
 	for {

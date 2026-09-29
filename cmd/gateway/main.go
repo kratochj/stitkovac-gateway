@@ -22,6 +22,7 @@ import (
 	"github.com/kratochj/stitkovac-gateway/internal/auth"
 	"github.com/kratochj/stitkovac-gateway/internal/cloud"
 	"github.com/kratochj/stitkovac-gateway/internal/dhcp"
+	"github.com/kratochj/stitkovac-gateway/internal/launcher"
 	"github.com/kratochj/stitkovac-gateway/internal/platform"
 	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
@@ -46,6 +47,8 @@ func run(args []string) error {
 		return nil
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	readyFD := flags.Int("launcher-ready-fd", 0, "Inherited launcher readiness pipe")
+	continueFD := flags.Int("launcher-continue-fd", 0, "Inherited launcher confirmation pipe")
 	dir := flags.String("data-dir", "/data/gateway", "Persistent state directory")
 	passwordFile := flags.String("password-file", "", "Read provisioning password from a private file (init only)")
 	adminAddress := flags.String("admin-address", "127.0.0.1:8443", "Explicit IPv4 address and port for HTTPS")
@@ -206,14 +209,44 @@ func run(args []string) error {
 			return err
 		}
 		server := &http.Server{Addr: *adminAddress, Handler: web.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
+		certificate, err := tls.LoadX509KeyPair(filepath.Join(*dir, "tls.crt"), filepath.Join(*dir, "tls.key"))
+		if err != nil {
+			return err
+		}
+		server.TLSConfig.Certificates = []tls.Certificate{certificate}
+		listener, err := tls.Listen("tcp4", *adminAddress, server.TLSConfig)
+		if err != nil {
+			return err
+		}
+		defer listener.Close()
+		defer server.Close()
 		result := make(chan error, 2)
-		go func() {
-			result <- server.ListenAndServeTLS(filepath.Join(*dir, "tls.crt"), filepath.Join(*dir, "tls.key"))
-		}()
+		go func() { result <- server.Serve(listener) }()
+		dhcpReady := make(chan struct{})
+		dhcpStopped := make(chan struct{})
 		if *device != "" {
 			go func() {
-				result <- dhcp.Serve(ctx, *device, dhcp.Handler{Store: s, Pool: pool}, func(error) { report("dhcp_request_failed") })
+				defer close(dhcpStopped)
+				result <- dhcp.Serve(ctx, *device, dhcp.Handler{Store: s, Pool: pool}, func(error) { report("dhcp_request_failed") }, func() { close(dhcpReady) })
 			}()
+		}
+		if *device == "" {
+			close(dhcpReady)
+			close(dhcpStopped)
+		}
+		defer func() { stop(); <-dhcpStopped }()
+		select {
+		case <-dhcpReady:
+		case err := <-result:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		readyContext, readyCancel := context.WithTimeout(ctx, 35*time.Second)
+		err = launcher.Ready(readyContext, version, *readyFD, *continueFD)
+		readyCancel()
+		if err != nil {
+			return err
 		}
 		cloudStopped := make(chan struct{})
 		if cloudClient != nil {

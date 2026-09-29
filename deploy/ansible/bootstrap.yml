@@ -5,6 +5,8 @@
   gather_facts: true
   vars:
     gateway_binary: "{{ playbook_dir }}/../../bin/gateway-linux-arm64"
+    gateway_launcher_binary: "{{ playbook_dir }}/../../bin/gateway-launcher-linux-arm64"
+    gateway_update_binary: "{{ playbook_dir }}/../../bin/gateway-update-linux-arm64"
     gateway_printer_interface: eth0
     gateway_printer_address: 192.168.77.1
     gateway_prefix_length: 24
@@ -82,6 +84,17 @@
         owner: root
         group: root
         mode: '0755'
+
+    - name: Install offline update tools without enabling OTA
+      ansible.builtin.copy:
+        src: "{{ item.source }}"
+        dest: "/usr/lib/stitkovac-gateway/{{ item.name }}"
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - { source: "{{ gateway_launcher_binary }}", name: gateway-launcher }
+        - { source: "{{ gateway_update_binary }}", name: gateway-update }
 
     - name: Install the storage guard
       ansible.builtin.copy:

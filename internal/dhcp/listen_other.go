@@ -7,6 +7,6 @@ import (
 	"errors"
 )
 
-func Serve(context.Context, string, Handler, func(error)) error {
+func Serve(context.Context, string, Handler, func(error), func()) error {
 	return errors.New("DHCP socket binding is supported only on Linux")
 }
