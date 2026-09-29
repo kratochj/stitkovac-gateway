@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Zařízení – Štítkovač Gateway</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><header><strong>Štítkovač Gateway</strong><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Odhlásit se</button></form></header>
+<main><h1>Zařízení na tiskové síti</h1><p class="identity">Brána <code>{{.ID}}</code> <span>Verze {{.Version}}</span></p>
+<aside><strong>Adresy zůstávají rezervované</strong><p>Každé zařízení při dalším připojení dostane stejnou IP adresu. Aktivní lease potvrzuje přidělení adresy, nikoli připravenost tiskárny.</p></aside>
+<div class="table-wrap"><table><caption>DHCP rezervace</caption><thead><tr><th scope="col">MAC adresa</th><th scope="col">IP adresa</th><th scope="col">Stav</th></tr></thead><tbody>
+{{range .Devices}}<tr><td><code>{{.MAC}}</code></td><td><code>{{.IP}}</code></td><td>{{if .Declined}}<span class="error">Konflikt adresy – vyžaduje servis</span>{{else if gt .LeaseUntil $.Now}}<span class="active">Aktivní lease</span>{{else}}Rezervováno{{end}}</td></tr>{{else}}<tr><td colspan="3" class="empty">Zatím není přidělená žádná adresa. Připojte tiskárnu v režimu DHCP k ethernetovému portu brány nebo k jejímu switchi.</td></tr>{{end}}
+</tbody></table></div><a class="refresh" href="/">Obnovit přehled</a></main></body></html>

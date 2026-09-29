@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Přihlášení – Štítkovač Gateway</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><header><strong>Štítkovač Gateway</strong><span>Servisní přístup</span></header>
+<main class="login"><h1>Přihlášení k bráně</h1><p>Zadejte servisní heslo tohoto zařízení.</p>
+{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+<form method="post" action="/login"><label for="password">Servisní heslo</label><input id="password" type="password" name="password" required maxlength="1024" autocomplete="current-password" autofocus><button type="submit">Přihlásit se</button></form></main></body></html>
