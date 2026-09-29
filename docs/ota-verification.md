@@ -1,10 +1,11 @@
 # Ověření dokončení OTA
 
-Datum: 2026-09-29. Změny jsou lokální na větvích `feat/gateway-foundation`
-(gateway) a `feat/gateway-ota` (server). Produkční server ani stávající
-VirtualBox VM nebyly při původní implementaci aktualizované. Následné
-[nasazení 0.1.5 do VM](virtualbox-lab.md#ota-launcher-015) již ověřilo skutečný
+Datum: 2026-09-29. Gateway změny jsou lokální na `feat/gateway-foundation`;
+serverové změny jsou sloučené do `main` a [nasazené jako 2.7.13](server-deployment-2.7.13.md).
+[Nasazení 0.1.5 do VM](virtualbox-lab.md#ota-launcher-015) ověřilo skutečný
 Ansible provisioning, podepsaný start, izolovaný rollback a webovou diagnostiku.
+Po nasazení serveru prošlo také autentizované OTA API a skutečné stažení
+podepsaného vydání updaterem z produkčního HTTPS repository.
 
 ## Provedené kontroly
 
@@ -45,11 +46,11 @@ produkční trust anchors.
 
 ## Provozní aktivace
 
-Implementované, ale dosud nepřipojené k produkci: release workflow na GitHubu,
-produkční podpisový klíč a publisher credential, ConfigMap veřejných klíčů,
-nová verze serveru a Ansible provisioning launcheru konkrétní brány.
+Nasazené: server 2.7.13, ConfigMap pilotního veřejného klíče, publisher Secret
+a launcher testovací VM. Pilotní binárka 0.1.5 je publikovaná. Zbývá zákaznický
+podpisový klíč a release workflow gateway na GitHubu.
 Gateway repozitář stále nemá remote; workflow tedy zatím neběželo v GitHub Actions.
-Ansible OTA playbook byl ověřen syntakticky, nebyl spuštěn na zákaznické bráně.
+Ansible OTA playbook prošel na testovací VM; na zákaznické bráně zatím spuštěný nebyl.
 
 Fyzické odebrání napájení na konkrétní RPi/SD kartě a tisk na PC42E patří do
 hardwarového pilotu. Postup konfigurace a kontrakt jsou v

@@ -1,9 +1,10 @@
 # Stav implementace
 
-Aktualizováno 2026-09-29. Serverová podpora bran je vydaná a nasazená v **2.7.12**
+Aktualizováno 2026-09-29. Serverová podpora bran je vydaná a nasazená v **2.7.13**
 na `cloud.stitkovac.app`. Agent má lokální administraci, cloudový transport
-a dokončenou softwarovou implementaci aplikačního OTA. Nová serverová OTA část
-je připravená na větvi `feat/gateway-ota` a zatím není v produkci. Nejde zatím o dokončenou zákaznickou instalaci.
+a dokončenou softwarovou implementaci aplikačního OTA. Serverová OTA část je
+nasazená v produkci s veřejným klíčem testovací brány. Nejde zatím o dokončenou
+zákaznickou instalaci.
 Gateway změny jsou commitované lokálně na `feat/gateway-foundation`; projekt
 zatím nemá nastavený vzdálený Git repozitář.
 
@@ -26,7 +27,7 @@ zatím nemá nastavený vzdálený Git repozitář.
 | Distribuce | ARM64 build všech nástrojů, systemd storage guard, Ansible bootstrap, sestavený a rozbalením ověřený `.deb`, ARM64 procesní test |
 | VirtualBox laboratoř | Debian ARM64 s read-only systémem, simulovaný WSS server, DHCP/TCP tiskárna, ověřený štítek a účtenka, obnova po tvrdém vypnutí VM |
 
-Podrobnosti: [nasazení serveru](server-deployment-2.7.12.md),
+Podrobnosti: [nasazení serveru](server-deployment-2.7.13.md),
 [OTA implementace a produkční aktivace](ota-implementation.md).
 Testovací build a jeho omezení: [VirtualBox laboratoř](virtualbox-lab.md).
 Agent **0.1.5** je nasazený v testovací VM přes podepsaný OTA launcher
@@ -36,9 +37,9 @@ je aktualizovaná při zachování nastaveného serveru a tokenu.
 
 ## Navazující implementační celky
 
-1. **Aktivace OTA v provozu:** vydat a nasadit serverovou větev, založit vzdálený
-   gateway repozitář, nastavit produkční klíče a chráněné CI prostředí, provisionovat
-   launcher na zařízeních. Implementace a lokální integrační testy jsou hotové.
+1. **Aktivace OTA v provozu:** server 2.7.13 a pilotní launcher jsou nasazené.
+   Pilotní 0.1.5 je publikované. Zbývá vzdálený gateway repozitář, produkční
+   podpisové klíče, chráněné CI prostředí a provisioning zákaznických zařízení.
 2. **Správa tiskáren:** automatická synchronizace DHCP rezervací a konfigurace,
    ruční řešení konfliktů rezervací, nejistých úloh a výměny tiskárny.
    Pojmenování a přiřazení brány/MAC/IP je nyní dostupné ve webu serveru ručně.

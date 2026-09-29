@@ -120,7 +120,7 @@ Simulátor uchovává nejvýše 100 úloh a posledních 50 zachycených dokument
 Tento test neověřuje Wi-Fi/AP, kompatibilitu Honeywell PC42E, SD kartu,
 skutečné odpojení napájení Raspberry Pi ani výpadek uprostřed fyzického tisku.
 Síťová administrace používá simulaci rádia. OTA launcher je ve VM nasazený;
-serverová OTA část zatím není v produkci.
+serverová OTA část je nasazená ve verzi 2.7.13.
 
 ## Export a opětovný import
 
@@ -210,8 +210,11 @@ Ověřeno na skutečné VM:
   adresář na `/data`; nemění běžící službu, její databázi ani aktivní vydání.
   Testovací manifest 9.9.9 není skutečné vydání a nesmí se publikovat.
 
-Repository origin je připravený na `https://cloud.stitkovac.app`, ale produkční
-server 2.7.12 zatím nemá nové OTA endpointy ani tento testovací veřejný klíč.
-Z jeho administrace tedy ještě nelze poslat aktualizaci. Lokální simulátor
-na portu 9443 také OTA rollout neimplementuje. Nasazení do VM ověřuje klienta,
-podpis a launcher; není to nový end-to-end test serverového OTA rollout procesu.
+Repository origin je `https://cloud.stitkovac.app`. Server **2.7.13** má nové
+OTA endpointy i testovací veřejný klíč; VM se po rollout znovu připojila a její
+autentizované OTA API vrátilo HTTP 200 s prázdnou frontou. Podepsaný balíček
+0.1.5 je publikovaný a veřejný manifest odpovídá lokálnímu podepsanému vydání.
+Skutečný updater ve VM jej stáhl z produkčního HTTPS do odděleného adresáře
+a ověřil podpis, SHA-256 i verzi binárky; aktivní instalace se nezměnila.
+Lokální simulátor na portu 9443 OTA rollout neimplementuje. Dosavadní ověření
+není nový end-to-end test vzdálené aktualizace běžící brány.

@@ -9,13 +9,15 @@ Serverový SUPERADMIN vybírá konkrétní brány a servisní okno v části
 a poslední stav. Nejdříve ověřit vydání na jedné zkušební bráně a pak vytvořit
 nasazení pro další vybrané brány. Publikování vydání samo nic neaktivuje.
 
-Produkční aktivace vyžaduje vydat novou serverovou verzi, nastavit skutečné
-podpisové klíče a publisher credential, připojit gateway repozitář ke GitHubu
-s chráněným release prostředím a provisionovat brány. V této implementaci
-nevznikl produkční klíč, nebyl nasazen server ani upravena zákaznická konfigurace
-stávající VM. Následně byla testovací VM aktualizovaná na 0.1.5 s launcherem
-a samostatným laboratorním klíčem; viz [nasazení do VM](virtualbox-lab.md#ota-launcher-015).
-Produkční aktivace tím není nahrazená.
+Serverová OTA část je nasazená v **2.7.13**, včetně veřejného pilotního klíče
+a samostatného publisher credential. Testovací VM běží na 0.1.5 s launcherem
+a samostatným laboratorním klíčem; viz [nasazení do VM](virtualbox-lab.md#ota-launcher-015)
+a [nasazení serveru](server-deployment-2.7.13.md). Podepsaná binárka pilotního
+vydání 0.1.5 je publikovaná v serverovém repository.
+
+Pro zákaznický provoz zbývá nastavit produkční podpisové klíče, připojit gateway
+repozitář ke GitHubu s chráněným release prostředím a provisionovat zařízení.
+Privátní podpisový klíč se na server nepřenáší.
 
 ## Průběh nasazení
 
