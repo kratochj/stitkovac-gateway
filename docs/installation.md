@@ -1,8 +1,8 @@
 # Příprava a ověření instalace
 
 Tento postup je pro vývojovou bránu. První implementace nemá hotový provisioning
-Wi-Fi, servisní AP, cloudové párování ani produkční serverové endpointy. Jejich
-návrh ve specifikaci neznamená, že jsou v balíčku již dostupné.
+Wi-Fi ani servisní AP. Serverové endpointy a webová registrace jsou implementované
+v sousedním projektu na větvi `feat/gateway-server`, ale zatím nejsou nasazené.
 
 ## Předpoklady
 
@@ -86,5 +86,5 @@ Současný produkční server jej ještě nemá; nezadávejte do brány běžný
 
 Integrační test v `internal/cloud` používá vlastní TLS server a simuluje tiskové
 spojení. Ověřuje dispatch a duplicity, nikoli hardwarovou kompatibilitu.
-Před zákaznickou instalací dokončit server, kontraktní testy, test proti PC42E,
+Před zákaznickou instalací nasadit ověřený server, dokončit test proti PC42E,
 firewall, změnu Wi-Fi a sérii fyzických power-cut zkoušek podle specifikace.

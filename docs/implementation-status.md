@@ -1,7 +1,7 @@
 # Stav implementace
 
-Aktualizováno 2026-09-29. První celek je funkční základ agenta s lokální
-administrací a testovaným cloudovým transportem. Nejde o dokončenou zákaznickou
+Aktualizováno 2026-09-29. Agent má lokální administraci a cloudový transport. Sousední `stitkovac-server`
+na větvi `feat/gateway-server` nově implementuje serverové napojení i správu bran. Nejde o dokončenou zákaznickou
 instalaci a změny zatím nejsou nasazené ani odeslané do vzdáleného repozitáře.
 
 ## Hotový základ
@@ -15,18 +15,21 @@ instalaci a změny zatím nejsou nasazené ani odeslané do vzdáleného repozit
 | Cloud | WSS handshake, heartbeat, reconnect, událostmi spouštěná synchronizace, HTTPS transport bez redirectů |
 | Tisk | Ověření checksumu, journal před TCP zápisem, max. čtyři endpointy, detekce nejistého výsledku |
 | Chyby | Oddělená omezená SQLite fronta, allowlist bez raw errors, opakované předání serverovému relay |
+| Server | Registrace, tokeny, session fencing, samostatná tisková fronta, WSS/HTTP API a Rollbar relay |
+| Web serveru | Registrace a správa tokenů, superadmin přehled, přiřazení brány a MAC k tiskárně |
 | Distribuce | ARM64 cross-build, systemd unit se storage guardem, bootstrap/diagnostika Ansible, `.deb` recept, CI |
 
 ## Navazující implementační celky
 
-1. **Server:** gateway registrace/tokeny, session fencing, gateway dispatch a outbox,
-   claim/start/result, bezpečný cursor, Rollbar relay a superadmin přehled.
-   Implementované integrační testy používají simulovaný server, ne Spring backend.
+1. **Nasazení serveru:** nové endpointy jsou implementované a testované lokálně,
+   zatím nejsou v produkci. Ověřit mezireplikovou latenci (záložní oznámení do 5 s),
+   oprávnění skutečného Rollbar projektu a kompatibilitu nainstalovaných klientů.
 2. **Síťová administrace:** NetworkManager helper, změna Wi-Fi s rollbackem,
    servisní AP, GPIO tlačítko, trvalé síťové profily a firewall provisioning.
-3. **Správa tiskáren:** pojmenování a přiřazení endpointů, synchronizace konfigurace,
+3. **Správa tiskáren:** automatická synchronizace DHCP rezervací a konfigurace,
    ruční řešení konfliktů rezervací, nejistých úloh a výměny tiskárny.
-   Přidělená DHCP adresa zatím není plnohodnotná serverová registrace tiskárny.
+   Pojmenování a přiřazení brány/MAC/IP je nyní dostupné ve webu serveru ručně.
+   Přidělená DHCP adresa sama ještě netvoří serverovou registraci tiskárny.
 4. **Provozní dokončení:** retence tiskových dokumentů a historie, servisní změny
    přístupů, bezpečné aktualizace/rollback, bootstrap celého OS image a panic recovery
    s původním místem chyby. Běžné transportní chyby už mají bezpečná hlášení.
@@ -36,5 +39,5 @@ instalaci a změny zatím nejsou nasazené ani odeslané do vzdáleného repozit
 
 Při chybě dnešní v1 synchronizace klient znovu připojí WSS a požádá o aktuální
 frontu. Detailní rozlišení neplatného jednotlivého jobu oproti výpadku transportu
-se doplní společně se serverovým kontraktem. Hardware se zatím neaktivuje pro
+zůstává k doplnění. Hardware se zatím neaktivuje pro
 zákaznický provoz; žádná chybějící část není považovaná za automaticky hotovou.

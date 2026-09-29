@@ -5,7 +5,7 @@ spojit přímo. Brána přijímá tiskové úlohy ze Štítkovače přes interne
 jejich dokumenty tiskárnám připojeným ethernetem.
 
 Projekt je samostatnou součástí workspace vedle `stitkovac-server`,
-`stitkovac-app` a ostatních projektů. Obsahuje první implementaci agenta;
+`stitkovac-app` a ostatních projektů. Obsahuje implementaci agenta;
 není zatím připravený pro produkční instalaci u zákazníka.
 
 **[Specifikace řešení](docs/specifikace.md)** pokrývá architekturu, lokální web,

@@ -1,8 +1,8 @@
-# Gateway API v1: první implementovaný klient
+# Gateway API v1: agent a server
 
-Stav: implementovaný klient a integrační test s TLS/WSS serverem. Produkční
-`stitkovac-server` tyto endpointy zatím neimplementuje. Nezapínat cloudové
-připojení na zákaznické bráně před dokončením serverové části a pilotu.
+Stav: implementováno v agentovi a v sousedním `stitkovac-server` na větvi
+`feat/gateway-server`. Změny jsou lokální; produkční cloud je zatím nemá.
+Před zákaznickým provozem je třeba nasazení a hardwarový pilot.
 
 Všechny cesty začínají `/api/gateway/v1`. Každý request má Bearer token brány.
 Po WSS handshake mají HTTP requesty pro úlohy také `X-Gateway-Session`.
@@ -54,7 +54,7 @@ opakovaném claimu; po trvalém přijetí výsledku už server úlohu nevrací.
 prokazatelný neúspěch před zápisem a `EXPIRED` neprovedený starý pokus.
 Nový tiskový pokus nesmí vzniknout automaticky z `UNKNOWN`.
 
-## Co zbývá v serveru
+## Diagnostické události
 
 `POST /events` přijímá očištěnou událost s `eventId`, `gatewayId`, `bootId`,
 `code`, `message`, `version`, `timestamp` a `frames` (file/function/line).
@@ -63,6 +63,21 @@ bez druhého vložení. Session hlavička není nutná, platný gateway token an
 Server znovu vynutí allowlist polí/kódů, doplní organizaci a odešle report do
 Rollbaru s původním Go stackem. Gateway neposílá Rollbar access token.
 
-Registrace a rotace tokenů, session fencing, tenant izolace, trvalý outbox,
-claim/start/result, cursor fronty, Rollbar relay, oddělení od LOCALNET a superadmin přehled.
-Před release doplnit kontraktní testy proti skutečnému Spring backendu.
+Serverová registrace a správa je v `/api/gateways`, superadmin seznam v
+`/api/admin/gateways`. Web `/gateways` umožňuje registraci a správu tokenů;
+formulář tiskárny podporuje protokol `GATEWAY`, `gatewayId` a `gatewayMac`.
+Server ukládá jen hash tokenu, transport nepřijímá uživatelský JWT.
+
+Server přidělí platnost pokusu 5 minut při vytvoření. Výsledek je neměnný;
+po jeho přijetí odstraní dokument a úlohu dále nevrací ve frontě. `UNKNOWN`
+blokuje další start na stejné IP/portu dané brány. Ruční odblokování zatím není
+implementované.
+
+Lokální post-commit push je obvykle do 100 ms. Záložní kontrola trvalé serverové
+fronty každých 5 sekund zajistí oznámení i po ztraceném signálu nebo z jiné repliky.
+Agent neprovádí periodické dotazování na úlohy.
+
+Kontraktní test `TestSpringBackend` se spouští přes serverové
+`GatewayTransportTests` s `GATEWAY_GO_COMMAND` a `GATEWAY_SOURCE`. Používá skutečný
+Go WSS/HTTPS klient proti Springu s MariaDB, TLS testovací ingress a simulovanou
+tiskárnu. Ověřuje i ztrátu potvrzení a reconnect bez druhého zápisu.
