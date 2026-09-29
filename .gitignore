@@ -1,0 +1,11 @@
+/bin/
+/dist/
+/.cache/
+/.local/
+/.DS_Store
+*.db
+*.db-shm
+*.db-wal
+*.key
+*.pem
+*.deb
