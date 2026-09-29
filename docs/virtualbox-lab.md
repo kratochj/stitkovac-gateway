@@ -76,6 +76,23 @@ Metadata tiskového testu jsou v `dist/virtualbox/smoke-results.json`.
 Další test lze spustit `python3 scripts/virtualbox/smoke.py`, když VM běží
 a jsou otevřené tunely. Přidá další dvě úlohy.
 
+Build **0.1.1** opravuje přihlášení do administrace: původní `Referrer-Policy:
+no-referrer` měnila Origin formuláře na `null`, který server správně odmítal.
+Politika `same-origin` zachovává původ vlastního formuláře a neposílá referrer
+jiným webům. Kontrola Origin ani CSRF nebyla vypnutá. Chyba byla zopakována
+a oprava ověřena skutečným Chromium včetně dashboardu a odhlášení.
+Chování hlavičky popisuje [Fetch Standard](https://fetch.spec.whatwg.org/#append-a-request-origin-header).
+Po aktualizaci znovu načti `/login`; neodesílej starý formulář z historie.
+
+Pro regresní test prohlížeče nainstaluj izolovanou testovací závislost a nastav
+cestu k existujícímu Chromium. Test načítá heslo ze soukromého souboru buildu,
+nevypisuje ho a nemění systémové úložiště certifikátů:
+
+```sh
+npm install --prefix .cache/browser-tests --no-audit --no-fund --ignore-scripts playwright-core@1.58.2
+GATEWAY_TEST_CHROMIUM=/absolute/path/to/chromium node scripts/virtualbox/smoke-browser.mjs
+```
+
 Simulátor uchovává nejvýše 100 úloh a posledních 50 zachycených dokumentů.
 `SENT` znamená úspěšné předání bajtů TCP simulátoru, ne důkaz fyzického tisku.
 Tento test neověřuje Wi-Fi/AP, kompatibilitu Honeywell PC42E, SD kartu,

@@ -42,8 +42,13 @@ func TestAuthenticationAndOrigin(t *testing.T) {
 	if w := request("GET", "/", "", "", nil); w.Code != 303 || strings.Contains(w.Body.String(), "MAC") {
 		t.Fatal("unauthenticated data leak")
 	}
-	if w := request("POST", "/login", "https://evil.invalid", "password=x", nil); w.Code != 403 {
-		t.Fatal("cross origin login allowed")
+	if w := request("GET", "/login", "", "", nil); w.Header().Get("Referrer-Policy") != "same-origin" {
+		t.Fatal("login policy must preserve Origin on same-origin browser form submissions")
+	}
+	for _, origin := range []string{"https://evil.invalid", "null", "", "http://127.0.0.1:8443", "https://127.0.0.1:9443"} {
+		if w := request("POST", "/login", origin, "password=x", nil); w.Code != 403 {
+			t.Fatalf("untrusted login origin %q allowed", origin)
+		}
 	}
 	w := request("POST", "/login", "https://127.0.0.1:8443", "password="+url.QueryEscape("a long test password"), nil)
 	if w.Code != 303 {
