@@ -16,6 +16,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// RestartExitCode is accepted only with a verified pending selection.
+const RestartExitCode = 75
+
+var errRequestedRestart = errors.New("agent requested update activation")
+
 type Options struct {
 	Root         string
 	Args         []string
@@ -40,7 +45,7 @@ func Run(ctx context.Context, store *update.Store, o Options) error {
 		return errors.New("another launcher owns this release directory")
 	}
 	defer unix.Flock(int(f.Fd()), unix.LOCK_UN)
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; ; {
 		v, err := store.BeginBoot()
 		if err != nil {
 			return err
@@ -58,13 +63,27 @@ func Run(ctx context.Context, store *update.Store, o Options) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		if confirmed && errors.Is(err, errRequestedRestart) {
+			selection, e := store.Status()
+			if e != nil {
+				return e
+			}
+			if selection.Pending == "" {
+				return errors.New("update restart without pending release")
+			}
+			attempt = 0
+			continue
+		}
 		if err == nil || !v.Trial || confirmed {
 			return err
+		}
+		attempt++
+		if attempt >= 2 {
+			return errors.New("previous release failed to start")
 		}
 		// A failed trial remains durable until BeginBoot rolls it back. Failure or
 		// power loss before this loop resumes gives the same result at the next boot.
 	}
-	return errors.New("previous release failed to start")
 }
 
 func runChild(ctx context.Context, path, version string, o Options, confirm func() error) (bool, error) {
@@ -150,6 +169,10 @@ func runChild(ctx context.Context, path, version string, o Options, confirm func
 	case <-ctx.Done():
 		return true, ctx.Err()
 	case <-finished:
+		var exit *exec.ExitError
+		if errors.As(waitErr, &exit) && exit.ExitCode() == RestartExitCode {
+			return true, errRequestedRestart
+		}
 		if waitErr == nil {
 			return true, errors.New("agent exited unexpectedly")
 		}

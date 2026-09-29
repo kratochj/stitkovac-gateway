@@ -140,3 +140,29 @@ func TestFailedStableAgentDoesNotInventRollback(t *testing.T) {
 		t.Fatal("changed stable selection")
 	}
 }
+
+func TestAgentRequestedRestartActivatesPendingRelease(t *testing.T) {
+	store, o, stage := setup(t)
+	marker := filepath.Join(o.Root, "running")
+	trigger := filepath.Join(o.Root, "activate")
+	script := healthy("1.0.0", marker)
+	script = strings.Replace(script, "while :; do sleep 1; done", "while [ ! -f "+quote(trigger)+" ]; do sleep 0.1; done\nexit 75", 1)
+	stage("1.0.0", script)
+	stage("2.0.0", healthy("2.0.0", marker))
+	if err := store.Initialize("1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	start(t, store, o)
+	waitMarker(t, marker, "1.0.0")
+	if err := store.Request("2.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(trigger, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	waitMarker(t, marker, "2.0.0")
+	s, err := store.Status()
+	if err != nil || s.Trial || s.Active != "2.0.0" {
+		t.Fatal(s, err)
+	}
+}

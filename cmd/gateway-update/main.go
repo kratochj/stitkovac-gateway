@@ -1,5 +1,3 @@
-// gateway-update is an offline service tool. Cloud-triggered activation is not
-// enabled until print draining and authenticated fleet commands are integrated.
 package main
 
 import (
@@ -25,7 +23,7 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: gateway-update download|stage|initialize|request|status [flags]")
+		return errors.New("usage: gateway-update download|stage|initialize|request|rollback|verify|status [flags]")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := flags.String("releases", "/data/gateway-releases", "Persistent release directory")
@@ -81,6 +79,25 @@ func run(args []string) error {
 		return store.Initialize(*version)
 	case "request":
 		return store.Request(*version)
+	case "rollback":
+		return store.RequestRollback(*version)
+	case "verify":
+		if *version != "" {
+			_, err := store.Executable(*version)
+			return err
+		}
+		selection, err := store.Status()
+		if err != nil {
+			return err
+		}
+		for _, v := range []string{selection.Active, selection.Previous, selection.Pending} {
+			if v != "" {
+				if _, err := store.Executable(v); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	case "status":
 		status, err := store.Status()
 		if err != nil {

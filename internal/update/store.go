@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kratochj/stitkovac-gateway/internal/platform"
 )
@@ -21,11 +22,12 @@ type Store struct {
 
 // Selection is a small atomic journal. It never includes or restores print data.
 type Selection struct {
-	Active   string `json:"active"`
-	Previous string `json:"previous,omitempty"`
-	Pending  string `json:"pending,omitempty"`
-	Trial    bool   `json:"trial"`
-	Failed   string `json:"failed,omitempty"`
+	Active          string `json:"active"`
+	Previous        string `json:"previous,omitempty"`
+	Pending         string `json:"pending,omitempty"`
+	Trial           bool   `json:"trial"`
+	Failed          string `json:"failed,omitempty"`
+	PendingRollback bool   `json:"pendingRollback,omitempty"`
 }
 
 // Open requires an explicitly provisioned private directory on persistent storage.
@@ -201,7 +203,8 @@ func (s *Store) readSelection() (Selection, error) {
 	var v Selection
 	if strictJSON(b, &v) != nil || !versionPattern.MatchString(v.Active) ||
 		v.Previous != "" && (!versionPattern.MatchString(v.Previous) || v.Previous == v.Active) ||
-		v.Pending != "" && (!versionPattern.MatchString(v.Pending) || !newer(v.Pending, v.Active)) ||
+		v.Pending != "" && (!versionPattern.MatchString(v.Pending) || (!newer(v.Pending, v.Active) && !v.PendingRollback)) ||
+		v.PendingRollback && (v.Pending == "" || v.Pending != v.Previous) ||
 		v.Failed != "" && !versionPattern.MatchString(v.Failed) ||
 		v.Trial && (v.Previous == "" || v.Pending != "") {
 		return Selection{}, errors.New("invalid release selection; operator recovery required")
@@ -252,7 +255,7 @@ func (s *Store) Request(version string) error {
 	if v.Trial || !newer(version, v.Active) || v.Pending != "" && v.Pending != version {
 		return errors.New("release is not a new unambiguous update")
 	}
-	v.Pending, v.Failed = version, ""
+	v.Pending, v.Failed, v.PendingRollback = version, "", false
 	return s.save(v)
 }
 
@@ -278,6 +281,7 @@ func (s *Store) BeginBoot() (Selection, error) {
 			v.Active, v.Previous, v.Pending, v.Trial = v.Pending, v.Active, "", true
 		}
 	}
+	v.PendingRollback = false
 	// Validate both the candidate and its fallback before changing the selection.
 	if _, err := s.Executable(v.Active); err != nil {
 		return Selection{}, err
@@ -308,4 +312,56 @@ func (s *Store) Confirm(version string) error {
 	}
 	v.Trial = false
 	return s.save(v)
+}
+
+// RequestRollback is deliberately separate from normal updates and can only
+// select the retained, verified previous release, never an arbitrary downgrade.
+func (s *Store) RequestRollback(version string) error {
+	unlock, err := platform.Lock(s.root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	v, err := s.readSelection()
+	if err != nil {
+		return err
+	}
+	if v.Trial || v.Pending != "" || version != v.Previous || version == "" {
+		return errors.New("no matching previous release")
+	}
+	if _, err := s.Executable(version); err != nil {
+		return err
+	}
+	v.Pending = version
+	v.PendingRollback = true
+	v.Failed = ""
+	return s.save(v)
+}
+
+// Cleanup retains the active, previous, pending and explicitly staged candidate.
+// It shares the installer lock; no partial download can be removed while written.
+func (s *Store) Cleanup(candidate string) error {
+	unlock, err := platform.Lock(s.root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	v, err := s.readSelection()
+	if err != nil {
+		return err
+	}
+	keep := map[string]bool{v.Active: true, v.Previous: true, v.Pending: true, candidate: true}
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if keep[e.Name()] || (!versionPattern.MatchString(e.Name()) && !strings.HasPrefix(e.Name(), ".staging-")) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(s.root, e.Name())); err != nil {
+			return err
+		}
+	}
+	return syncDir(s.root)
 }

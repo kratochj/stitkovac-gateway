@@ -15,7 +15,7 @@ import (
 const (
 	MaxManifest      = 16 << 10
 	MaxArtifact      = 128 << 20
-	LauncherProtocol = 1
+	LauncherProtocol = 2
 )
 
 var versionPattern = regexp.MustCompile(`^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$`)
@@ -63,7 +63,7 @@ func Verify(b []byte, keys map[string]ed25519.PublicKey, platform string) (Manif
 	if !keyPattern.MatchString(e.KeyID) || len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, append([]byte(signatureDomain), e.Payload...), e.Signature) {
 		return m, errors.New("untrusted release signature")
 	}
-	if strictJSON(e.Payload, &m) != nil || m.Schema != 1 || !versionPattern.MatchString(m.Version) || m.Platform != platform || m.Size < 1 || m.Size > MaxArtifact || !digestPattern.MatchString(m.SHA256) || m.LauncherProtocol != LauncherProtocol {
+	if strictJSON(e.Payload, &m) != nil || m.Schema != 1 || !versionPattern.MatchString(m.Version) || m.Platform != platform || m.Size < 1 || m.Size > MaxArtifact || !digestPattern.MatchString(m.SHA256) || (m.LauncherProtocol < 1 || m.LauncherProtocol > LauncherProtocol) {
 		return Manifest{}, errors.New("incompatible release manifest")
 	}
 	return m, nil
@@ -80,3 +80,6 @@ func newer(a, b string) bool {
 	}
 	return false
 }
+
+// ValidVersion is the stable release grammar shared with the control protocol.
+func ValidVersion(v string) bool { return versionPattern.MatchString(v) }

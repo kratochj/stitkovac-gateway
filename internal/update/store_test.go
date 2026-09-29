@@ -243,3 +243,41 @@ func TestExistingReleaseCannotBeOverwritten(t *testing.T) {
 		t.Fatal("existing release changed")
 	}
 }
+
+func TestControlledRollbackAndRetention(t *testing.T) {
+	f := setup(t)
+	for _, v := range []string{"1.0.0", "2.0.0", "3.0.0", "4.0.0"} {
+		f.stage(t, v)
+	}
+	must(t, f.store.Initialize("2.0.0"))
+	must(t, f.store.Request("3.0.0"))
+	_, err := f.store.BeginBoot()
+	must(t, err)
+	must(t, f.store.Confirm("3.0.0"))
+	if f.store.Request("2.0.0") == nil || f.store.RequestRollback("1.0.0") == nil {
+		t.Fatal("arbitrary downgrade accepted")
+	}
+	must(t, os.Mkdir(filepath.Join(f.root, ".staging-cut"), 0700))
+	must(t, f.store.Cleanup("4.0.0"))
+	for _, v := range []string{"2.0.0", "3.0.0", "4.0.0"} {
+		_, err = f.store.Executable(v)
+		must(t, err)
+	}
+	for _, v := range []string{"1.0.0", ".staging-cut"} {
+		if _, err := os.Stat(filepath.Join(f.root, v)); !os.IsNotExist(err) {
+			t.Fatal("obsolete release retained")
+		}
+	}
+	must(t, f.store.RequestRollback("2.0.0"))
+	s, err := f.store.BeginBoot()
+	must(t, err)
+	if s.Active != "2.0.0" || s.Previous != "3.0.0" || !s.Trial {
+		t.Fatal(s)
+	}
+	// A failed rollback trial must restore the version from which rollback started.
+	s, err = f.store.BeginBoot()
+	must(t, err)
+	if s.Active != "3.0.0" || s.Failed != "2.0.0" {
+		t.Fatal(s)
+	}
+}
