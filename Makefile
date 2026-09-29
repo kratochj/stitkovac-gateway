@@ -1,7 +1,7 @@
 GO ?= go
 VERSION ?= dev
 
-.PHONY: test check build arm64
+.PHONY: test check build arm64 lab-arm64
 test:
 	$(GO) test -race ./...
 
@@ -19,3 +19,6 @@ arm64:
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags '-X main.version=$(VERSION)' -o bin/gateway-linux-arm64 ./cmd/gateway
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o bin/gateway-launcher-linux-arm64 ./cmd/gateway-launcher
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o bin/gateway-update-linux-arm64 ./cmd/gateway-update
+
+lab-arm64: arm64
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o bin/gateway-lab-linux-arm64 ./cmd/gateway-lab
