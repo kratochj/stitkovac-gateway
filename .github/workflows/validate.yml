@@ -14,8 +14,13 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: python3 -m unittest discover -s deploy/systemd -p "test_*.py"
-      - run: make check test arm64
+      - run: make VERSION=0.1.0 check test build arm64
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - run: sh scripts/test-ota.sh
       - run: sh scripts/package.sh 0.1.0-dev
+      - run: sh scripts/test-package.sh dist/stitkovac-gateway_0.1.0-dev_arm64.deb
       - uses: actions/upload-artifact@v4
         with:
           name: gateway-arm64
