@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 func testServer(t *testing.T) *Server {
@@ -71,6 +73,8 @@ func TestLabRequiresAuthenticationOriginAndCSRF(t *testing.T) {
 }
 func TestLabPrintIsDurableAndTerminalResultIsImmutable(t *testing.T) {
 	s := testServer(t)
+	s.conn = &websocket.Conn{}
+	s.session = "session"
 	form := url.Values{"kind": {"receipt"}, "csrf": {s.csrf}}
 	if w := request(s, "POST", "/print", form.Encode(), true, true); w.Code != 303 {
 		t.Fatalf("print failed: %d %s", w.Code, w.Body.String())
@@ -83,6 +87,9 @@ func TestLabPrintIsDurableAndTerminalResultIsImmutable(t *testing.T) {
 		t.Fatal("job was not committed")
 	}
 	job := reopened.jobs[0]
+	if job.CreatedAt == 0 || job.UpdatedAt == 0 {
+		t.Fatal("job timestamps were not persisted")
+	}
 	if !bytes.HasPrefix(job.Document, []byte("%PDF-1.4")) || !bytes.HasSuffix(job.Document, []byte("%%EOF\n")) {
 		t.Fatal("invalid PDF envelope")
 	}

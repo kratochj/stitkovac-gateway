@@ -218,3 +218,54 @@ Skutečný updater ve VM jej stáhl z produkčního HTTPS do odděleného adres�
 a ověřil podpis, SHA-256 i verzi binárky; aktivní instalace se nezměnila.
 Lokální simulátor na portu 9443 OTA rollout neimplementuje. Dosavadní ověření
 není nový end-to-end test vzdálené aktualizace běžící brány.
+
+## Živý přehled tisku v laboratoři
+
+Web laboratoře na portu 9443 rozlišuje dva zdroje dat:
+
+- **Dokumenty přijaté tiskárnou** jsou skutečné TCP přenosy uložené simulátorem,
+  také při tisku z cloudového serveru. Přehled ukazuje čas přijetí, velikost
+  a odkaz na původní dokument. Nezná ID ani konečný stav cloudové úlohy;
+  ty jsou v administraci serveru a v historii samotné brány na portu 8443.
+- **Historie úloh místního testovacího serveru** obsahuje jen tisky vytvořené
+  tlačítky laboratoře. Po přepojení brány na cloud zůstává její starší obsah
+  zachovaný. `SENT` znamená předané bajty, nikoli potvrzený fyzický tisk.
+
+Přehled se obnovuje přes autentizovaný SSE stream `/events`, bez reloadu stránky.
+Server každou sekundu kontroluje lokální soubory zachycené samostatným procesem
+simulátoru; nepoluje cloudovou tiskovou frontu. Změny odesílá do prohlížeče
+hned při dalším snímku, heartbeat každých 10 sekund. Web ukazuje poslední ověření
+stavu. Při chybě spojení, přechodu offline nebo chybějícím heartbeat označí data
+jako neaktuální a po obnovení spojení načte celý současný stav.
+
+Místní testovací tlačítka jsou aktivní pouze s připojenou bránou a DHCP adresou;
+server odmítne také ručně odeslaný formulář, pokud místní WSS spojení chybí.
+Staré úlohy bez časových údajů ukazují „Čas nebyl zaznamenán“. Nové úlohy mají
+trvale uložený čas vytvoření a poslední změny stavu.
+
+Tato oprava patří do **gateway-lab**, nikoli do OTA balíčku agenta 0.1.6.
+Je připravená ve zdrojích a ARM64 binárce `bin/gateway-lab-linux-arm64`;
+běžící VM ani server nebyly při této opravě aktualizované.
+
+Regrese: `go test -race ./internal/lab`, Go vet a ARM64 build pomocného procesu.
+Volitelný prohlížečový test používá oddělený dočasný HTTPS server a TCP tiskárnu
+na Macu. Nečte přístupy ani konfiguraci VM:
+
+```sh
+mkdir -p .cache/lab-live-browser
+rm -f .cache/lab-live-browser/done .cache/lab-live-browser/fixture.json
+GATEWAY_LAB_BROWSER_DIR="$PWD/.cache/lab-live-browser" \
+  go test -run '^TestLabBrowserFixture$' -count=1 -v ./internal/lab
+```
+
+Po vzniku `fixture.json` spusť v druhém terminálu s nastaveným
+`GATEWAY_TEST_CHROMIUM` (stejně jako u ostatních smoke testů):
+
+```sh
+GATEWAY_LAB_BROWSER_DIR="$PWD/.cache/lab-live-browser" \
+  node scripts/virtualbox/smoke-lab-live.mjs
+```
+
+Test ověřuje skutečný TCP příjem a automatické zobrazení bez navigace, heartbeat
+přes běžný HTTP write timeout, ztrátu a obnovu spojení, zachování oddělené historie
+a mobilní šířku 390 px. Po dokončení se testovací servery ukončí.
