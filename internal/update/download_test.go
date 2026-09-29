@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestDownloadVerifiesBeforePublishing(t *testing.T) {
@@ -108,5 +109,47 @@ func TestDownloadRestrictsOriginAndVersion(t *testing.T) {
 	cancel()
 	if _, err := f.store.Download(ctx, "https://example.com", "1.0.0", nil); err == nil {
 		t.Fatal("ignored cancelled update")
+	}
+}
+
+func TestDownloadWaitsForHostingCapacity(t *testing.T) {
+	f := setup(t)
+	data := []byte("signed artifact")
+	envelope := f.envelope(t, "1.0.0", data)
+	var attempts atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) <= 2 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "manifest.json") {
+			w.Write(envelope)
+		} else {
+			w.Write(data)
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := f.store.Download(ctx, server.URL, "1.0.0", server.Client().Transport)
+	must(t, err)
+	if attempts.Load() != 4 {
+		t.Fatal("download did not retry hosting pressure")
+	}
+	_, err = f.store.Executable("1.0.0")
+	must(t, err)
+}
+func TestHostingBackoffHonorsCancellation(t *testing.T) {
+	f := setup(t)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Header().Set("Retry-After", "30"); w.WriteHeader(503) }))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := f.store.Download(ctx, server.URL, "1.0.0", server.Client().Transport); err == nil {
+		t.Fatal("unexpected success")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("backoff ignored cancellation")
 	}
 }
