@@ -14,6 +14,7 @@ zatím nemá nastavený vzdálený Git repozitář.
 | Persistence | SQLite WAL/FULL, odmítnutí chybějícího úložiště, obnova po ukončení procesu bez cleanupu |
 | DHCP | MAC rezervace před OFFER, lease před ACK, RELEASE bez ztráty rezervace, DECLINE karanténa |
 | Servisní web | HTTPS login/logout, CSRF/Origin/Host ochrany, limit přihlašování, přehled rezervací, nastavení adresy serveru a tokenu, stav WSS připojení |
+| Síťová administrace | Root NetworkManager helper, Wi-Fi s rollbackem, servisní AP, GPIO, trvalé profily, oddělené DHCP a firewall provisioning; software ověřen, rádiová část čeká na RPi pilot |
 | Diagnostika tisku | Historie po 50 pokusech, filtr stavu, časy a potvrzení serverem, upozornění na UNKNOWN, TCP test aktivní rezervace bez odeslání dat a bez souběhu s tiskem |
 | Cloud | WSS handshake, heartbeat, reconnect, událostmi spouštěná synchronizace, HTTPS transport bez redirectů |
 | Tisk | Ověření checksumu, journal před TCP zápisem, max. čtyři endpointy, detekce nejistého výsledku |
@@ -27,7 +28,8 @@ zatím nemá nastavený vzdálený Git repozitář.
 Podrobnosti: [nasazení serveru](server-deployment-2.7.12.md),
 [OTA implementace a zbývající části](ota-implementation.md).
 Testovací build a jeho omezení: [VirtualBox laboratoř](virtualbox-lab.md).
-Agent 0.1.3: [historie a diagnostika tisku](print-diagnostics.md); současná VM
+Agent 0.1.4: [síťová administrace a instalační postup](network-administration.md).
+Předchozí celek: [historie a diagnostika tisku](print-diagnostics.md); současná VM
 je aktualizovaná při zachování nastaveného serveru a tokenu.
 
 ## Navazující implementační celky
@@ -35,16 +37,14 @@ je aktualizovaná při zachování nastaveného serveru a tokenu.
 1. **Dokončení OTA:** serverové příkazy přes WSS, superadmin rollout a audit,
    dokončení aktivního tisku před aktualizací, release hosting, klíče a podpisové
    CI. Výchozí systemd unit zatím není přepnutá na launcher.
-2. **Síťová administrace:** NetworkManager helper, změna Wi-Fi s rollbackem,
-   servisní AP, GPIO tlačítko, trvalé síťové profily a firewall provisioning.
-3. **Správa tiskáren:** automatická synchronizace DHCP rezervací a konfigurace,
+2. **Správa tiskáren:** automatická synchronizace DHCP rezervací a konfigurace,
    ruční řešení konfliktů rezervací, nejistých úloh a výměny tiskárny.
    Pojmenování a přiřazení brány/MAC/IP je nyní dostupné ve webu serveru ručně.
    Přidělená DHCP adresa sama ještě netvoří serverovou registraci tiskárny.
-4. **Provozní dokončení:** retence tiskových dokumentů a historie, servisní změny
+3. **Provozní dokončení:** retence tiskových dokumentů a historie, servisní změny
    přístupů, retence vydání, bootstrap celého OS image a panic recovery
    s původním místem chyby. Běžné transportní chyby už mají bezpečná hlášení.
-5. **Pilot:** produkční end-to-end tisk, samostatný Rollbar projekt/token,
+4. **Pilot:** produkční end-to-end tisk, samostatný Rollbar projekt/token,
    kompatibilita nainstalovaných klientů, mezirepliková latence, PC42E,
    MAC/IP conflict detection, DHCP interoperabilita,
    read-only image, reálné odebrání napájení a měření latence. Bez Raspberry Pi

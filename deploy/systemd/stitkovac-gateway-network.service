@@ -1,0 +1,36 @@
+[Unit]
+Description=Stitkovac privileged network controller
+After=NetworkManager.service nftables.service
+Requires=NetworkManager.service nftables.service
+RequiresMountsFor=/data /etc/NetworkManager/system-connections /var/lib/NetworkManager
+ConditionPathExists=/etc/stitkovac-gateway/network.json
+
+[Service]
+Type=simple
+User=root
+Group=stitkovac-gateway
+ExecStartPre=/usr/lib/stitkovac-gateway/check-storage
+ExecStart=/usr/lib/stitkovac-gateway/gateway-network
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+RuntimeDirectory=stitkovac-gateway-network
+RuntimeDirectoryMode=0750
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=/data/network /etc/NetworkManager/system-connections /run/stitkovac-gateway-network
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+LockPersonality=true
+RestrictSUIDSGID=true
+MemoryMax=128M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

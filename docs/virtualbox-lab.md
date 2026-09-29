@@ -4,10 +4,10 @@ Připraveno a ověřeno 2026-09-29 na MacBooku s Apple Silicon, macOS 26.4.1
 a VirtualBoxem 7.2.4. VM používá Debian 13 ARM64, 2 CPU, 2 GB RAM,
 8GB systémový a 2GB datový disk. Tento obraz není pro Intel Mac.
 
-Aktuálně registrovaná VM používá agenta **0.1.3** s [historií a diagnostikou
-tisku](print-diagnostics.md). Existující OVA z předchozího exportu obsahuje
+Aktuálně registrovaná VM používá agenta **0.1.4** se [síťovou administrací
+a její simulací](network-administration.md) a [diagnostikou tisku](print-diagnostics.md). Existující OVA z předchozího exportu obsahuje
 **0.1.2**. Nový export z aktuální VM nebyl vytvořen; zachovává se její nastavené
-připojení k serveru. Sestavení nové čisté laboratoře ze zdrojů používá 0.1.3.
+připojení k serveru. Sestavení nové čisté laboratoře ze zdrojů používá 0.1.4.
 
 ## Spuštění připraveného buildu
 
@@ -159,3 +159,11 @@ Virtuální hardware se připravuje tímto skriptem; konfigurace Linuxu je v
 `deploy/virtualbox/provision.yml`, která znovu používá běžný Ansible bootstrap.
 Konkrétní dodaný obraz byl sestaven těmito kroky průběžně; závěrečný wrapper
 má syntaktickou kontrolu, druhé kompletní sestavení od nuly neproběhlo.
+
+## Síťová administrace 0.1.4
+
+Současná VM je aktualizovaná na 0.1.4. Stránka **Síť** obsahuje explicitně
+označenou simulaci Wi-Fi a AP. Skutečný NAT, tiskárna a cloudové přístupy zůstávají
+zachované. Detaily a opakovatelný instalační/testovací postup jsou v
+[síťové administraci](network-administration.md). Existující export OVA 0.1.2
+se nemění; aktualizovaná VM s vlastním cloudovým tokenem se neexportovala.

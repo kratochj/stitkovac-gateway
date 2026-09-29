@@ -26,6 +26,8 @@ Chyby se hlásí do Rollbaru přes server Štítkovače.
 - DHCPv4 s trvalou MAC/IP rezervací před OFFER a záznamem lease před ACK.
 - HTTPS servisní přihlášení s Argon2id a přehled nalezených zařízení.
 - Nastavení serveru a tokenu ve webu, trvalé uložení a přepnutí WSS spojení bez restartu.
+- Síťová administrace: Wi-Fi s rollbackem, servisní AP, GPIO a trvalé profily přes root helper.
+- Ansible provisioning izolovaných sítí a firewallu, simulace síťového ovládání ve VirtualBoxu.
 - Historie tiskových pokusů, upozornění na nejisté výsledky a lokální TCP diagnostika tiskáren.
 - Odchozí WSS, obnovování spojení, HTTPS claim/download/start/result a RAW TCP tisk.
 - Omezená trvalá fronta očištěných chyb pro serverový Rollbar relay.
@@ -57,6 +59,7 @@ Linux; lokální příkaz bez dalších parametrů nespouští DHCP ani cloudov�
 Další informace:
 
 - [Testovací VirtualBox build se simulovanou tiskárnou](docs/virtualbox-lab.md).
+- [Síťová administrace a provisioning](docs/network-administration.md).
 - [Historie a diagnostika tisku](docs/print-diagnostics.md).
 - [Stav implementace a zbývající práce](docs/implementation-status.md).
 - [Stav aplikačního OTA a launcheru](docs/ota-implementation.md).

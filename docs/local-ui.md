@@ -1,8 +1,8 @@
 # Lokální servisní rozhraní
 
 Účel první obrazovky: technik pozná identitu brány a zařízení, kterým přidělila
-adresy. První implementace poskytuje přihlášení a přehled rezervací; nastavení
-Wi-Fi a cloudové párování budou samostatné navazující části.
+adresy. Rozhraní poskytuje přihlášení, rezervace, serverové připojení, diagnostiku
+tisku a od 0.1.4 také [síťovou administraci](network-administration.md).
 
 Vizuální návrh: bílé pracovní plochy `#ffffff`, světlé pozadí `#eef2f5`,
 tmavě modrý text `#19334a`, modrá akce `#155fa0`, zelený stav `#23613e`

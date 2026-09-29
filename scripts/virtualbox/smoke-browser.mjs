@@ -87,6 +87,50 @@ try {
     assert.equal(await page.locator('#server_url').inputValue(), originalServer);
     console.log('Printer probe, history, state filter and mobile layout passed without changing cloud settings.');
   }
+  if (process.argv.includes('--network')) {
+    await page.goto(base + '/');
+    const originalServer = await page.locator('#server_url').inputValue();
+    await page.goto(base + '/network');
+    assert.match(await page.locator('body').innerText(), /Simulace sítě/);
+    const networkState = async text => {
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await page.reload();
+        if ((await page.locator('main').innerText()).includes(text)) return;
+        await page.waitForTimeout(250);
+      }
+      assert.fail('Network state did not reach ' + text);
+    };
+    await page.locator('form[action="/network/scan"] button').click();
+    assert.match(await page.locator('table').innerText(), /Simulated Wi-Fi/);
+    const apply = async ssid => {
+      await page.locator('#ssid').fill(ssid);
+      await page.locator('#password').fill('browser-test-password');
+      const response = page.waitForResponse(r => r.url() === base + '/network/wifi' && r.request().method() === 'POST');
+      await page.locator('form[action="/network/wifi"] button').click();
+      assert.equal((await response).status(), 303);
+      await page.waitForURL(base + '/network?saved=1');
+      assert.equal(await page.locator('#password').inputValue(), '');
+      assert(!(await page.content()).includes('browser-test-password'));
+    };
+    await apply('Simulated Wi-Fi');
+    await networkState('Wi-Fi zákazníka · Simulated Wi-Fi');
+    await apply('Simulated failure');
+    await networkState('Přes novou Wi-Fi se nepodařilo ověřit TLS');
+    assert.equal(await page.locator('#ssid').inputValue(), 'Simulated Wi-Fi');
+    await page.locator('form[action="/network/ap"] button').click();
+    await networkState('Návrat na Wi-Fi:');
+    await page.locator('form[action="/network/uplink"] button').click();
+    await networkState('Wi-Fi zákazníka · Simulated Wi-Fi');
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.screenshot({ path: new URL('../../dist/virtualbox/network.png', import.meta.url).pathname, fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Network page overflows mobile viewport');
+    await page.screenshot({ path: new URL('../../dist/virtualbox/network-mobile.png', import.meta.url).pathname, fullPage: true });
+    await page.goto(base + '/');
+    assert.equal(await page.locator('#server_url').inputValue(), originalServer);
+    assert.match(await page.locator('#cloud-state').innerText(), /Připojeno k serveru/);
+    console.log('Simulated Wi-Fi scan, success, rollback, AP, mobile layout and unchanged cloud connection passed.');
+  }
   const logoutResponse = page.waitForResponse(r => r.url() === base + '/logout' && r.request().method() === 'POST');
   await page.locator('form[action="/logout"] button').click();
   assert.equal((await logoutResponse).status(), 303, 'Browser logout must succeed');

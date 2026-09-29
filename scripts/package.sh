@@ -8,12 +8,15 @@ command -v dpkg-deb >/dev/null
 test -f bin/gateway-linux-arm64
 test -f bin/gateway-launcher-linux-arm64
 test -f bin/gateway-update-linux-arm64
+test -f bin/gateway-network-linux-arm64
 stage=$(mktemp -d)
 chmod 755 "$stage"
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
 mkdir -p "$stage/DEBIAN" "$stage/usr/lib/stitkovac-gateway" "$stage/lib/systemd/system" dist
 install -m 755 bin/gateway-linux-arm64 "$stage/usr/lib/stitkovac-gateway/gateway"
 install -m 755 bin/gateway-launcher-linux-arm64 "$stage/usr/lib/stitkovac-gateway/gateway-launcher"
+install -m 755 bin/gateway-network-linux-arm64 "$stage/usr/lib/stitkovac-gateway/gateway-network"
+install -m 644 deploy/systemd/stitkovac-gateway-network.service "$stage/lib/systemd/system/stitkovac-gateway-network.service"
 install -m 755 bin/gateway-update-linux-arm64 "$stage/usr/lib/stitkovac-gateway/gateway-update"
 install -m 755 deploy/systemd/check-storage "$stage/usr/lib/stitkovac-gateway/check-storage"
 install -m 644 deploy/systemd/stitkovac-gateway.service "$stage/lib/systemd/system/stitkovac-gateway.service"

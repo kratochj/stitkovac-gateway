@@ -1,0 +1,24 @@
+#!/usr/sbin/nft -f
+# This dedicated appliance does not route customer, printer or service traffic.
+add table inet stitkovac_gateway
+flush table inet stitkovac_gateway
+table inet stitkovac_gateway {
+ set service_ap_ifaces { type ifname; }
+ chain input {
+  type filter hook input priority 0; policy drop;
+  iifname "lo" accept
+  ct state invalid drop
+  ct state established,related accept
+  ip protocol icmp accept
+  ip6 nexthdr icmpv6 accept
+  iifname "{{ gateway_printer_interface }}" udp sport 68 udp dport 67 accept
+  iifname "{{ gateway_wifi_interface }}" udp sport 67 udp dport 68 accept
+  iifname @service_ap_ifaces ip saddr { 0.0.0.0, {{ gateway_ap_network }} } udp sport 68 udp dport 67 accept
+  iifname "{{ gateway_printer_interface }}" ip daddr {{ gateway_printer_address }} tcp dport { 22, 8443 } accept
+  iifname @service_ap_ifaces ip saddr {{ gateway_ap_network }} ip daddr {{ gateway_ap_address }} tcp dport { 22, 8443 } accept
+ }
+ chain forward { type filter hook forward priority 0; policy drop; }
+ chain output { type filter hook output priority 0; policy accept; }
+}
+# A firewall reload closes AP access until the controller explicitly enables it.
+flush set inet stitkovac_gateway service_ap_ifaces

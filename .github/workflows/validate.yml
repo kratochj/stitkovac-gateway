@@ -18,6 +18,7 @@ jobs:
       - uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
+      - run: sh scripts/test-network.sh
       - run: sh scripts/test-ota.sh
       - run: sh scripts/package.sh 0.1.0-dev
       - run: sh scripts/test-package.sh dist/stitkovac-gateway_0.1.0-dev_arm64.deb

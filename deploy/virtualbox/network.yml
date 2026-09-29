@@ -1,0 +1,145 @@
+---
+- name: Add simulated network administration to an existing VirtualBox lab
+  hosts: gateways
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require the isolated lab services
+      ansible.builtin.command:
+        argv: [systemctl, is-active, gateway-lab-network]
+      changed_when: false
+
+    - name: Check that no print is being transferred
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import sqlite3
+            db = sqlite3.connect('file:/data/gateway/gateway.db?mode=ro', uri=True)
+            assert db.execute("SELECT count(*) FROM attempts WHERE state IN ('CLAIMED','SENDING')").fetchone()[0] == 0, 'Printing is active'
+      changed_when: false
+
+    - name: Stop services for the lab binary update
+      ansible.builtin.systemd_service:
+        name: stitkovac-gateway
+        state: stopped
+
+    - name: Inspect existing lab services
+      ansible.builtin.service_facts:
+
+    - name: Stop the old helper before replacing its executable
+      ansible.builtin.systemd_service:
+        name: stitkovac-gateway-network
+        state: stopped
+      when: "'stitkovac-gateway-network.service' in ansible_facts.services"
+
+    - name: Temporarily remount the lab root for installation
+      ansible.builtin.command:
+        argv: [mount, -o, 'remount,rw', /]
+      changed_when: true
+
+    - name: Install the lab update
+      block:
+        - name: Create persistent simulation profiles
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+          loop: [/data/network, /data/network/profiles]
+
+        - name: Read the service account
+          ansible.builtin.getent:
+            database: passwd
+            key: stitkovac-gateway
+
+        - name: Install updated agent and helper
+          ansible.builtin.copy:
+            src: "../../bin/{{ item }}-linux-arm64"
+            dest: "/usr/lib/stitkovac-gateway/{{ item }}"
+            owner: root
+            group: root
+            mode: '0755'
+          loop: [gateway, gateway-network]
+
+        - name: Install simulation-only configuration
+          ansible.builtin.copy:
+            dest: /etc/stitkovac-gateway/network.json
+            owner: root
+            group: root
+            mode: '0600'
+            content: "{{ simulation_config | combine({'agentUID': getent_passwd['stitkovac-gateway'][1] | int, 'agentGID': getent_passwd['stitkovac-gateway'][2] | int}) | to_nice_json }}"
+          vars:
+            simulation_config:
+              dataDir: /data/network
+              profileDir: /data/network/profiles
+              wifiInterface: simulated0
+              printerInterface: vgw0
+              printerCIDR: 192.168.77.1/24
+              apCIDR: 192.168.78.1/24
+              apSSID: Stitkovac-GW-simulation
+              apPassword: simulation-only-not-a-radio
+              country: CZ
+              apID: 11111111-1111-4111-8111-111111111111
+              agentUID: "{{ getent_passwd['stitkovac-gateway'][1] | int }}"
+              agentGID: "{{ getent_passwd['stitkovac-gateway'][2] | int }}"
+              simulation: true
+          no_log: true
+
+        - name: Install isolated simulation service
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/stitkovac-gateway-network.service
+            mode: '0644'
+            content: |
+              [Unit]
+              Description=Stitkovac simulated network administration (no radio)
+              RequiresMountsFor=/data
+              [Service]
+              User=root
+              Group=stitkovac-gateway
+              ExecStartPre=/usr/lib/stitkovac-gateway/check-storage
+              ExecStart=/usr/lib/stitkovac-gateway/gateway-network
+              RuntimeDirectory=stitkovac-gateway-network
+              RuntimeDirectoryMode=0750
+              UMask=0077
+              Restart=on-failure
+              NoNewPrivileges=true
+              ProtectSystem=strict
+              ProtectHome=true
+              PrivateTmp=true
+              ReadWritePaths=/data/network /run/stitkovac-gateway-network
+              RestrictAddressFamilies=AF_UNIX
+              [Install]
+              WantedBy=multi-user.target
+
+        - name: Enable simulation for subsequent lab boots
+          ansible.builtin.systemd_service:
+            name: stitkovac-gateway-network
+            enabled: true
+            daemon_reload: true
+      always:
+        - name: Flush installation changes
+          ansible.builtin.command: sync
+          changed_when: false
+        - name: Restore read-only root
+          ansible.builtin.command:
+            argv: [mount, -o, 'remount,ro', /]
+          changed_when: true
+
+    - name: Verify restored storage protection
+      ansible.builtin.command:
+        argv: [/usr/lib/stitkovac-gateway/check-storage]
+      changed_when: false
+
+    - name: Clear previous startup failures after installing the configuration
+      ansible.builtin.command:
+        argv: [systemctl, reset-failed, stitkovac-gateway-network, stitkovac-gateway]
+      changed_when: false
+
+    - name: Start helper and agent with existing cloud credentials
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: restarted
+      loop: [stitkovac-gateway-network, stitkovac-gateway]

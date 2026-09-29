@@ -9,7 +9,7 @@ dpkg-deb --extract "$package" "$root"
 test "$(stat -c %a "$root")" = 755
 test "$(stat -c %a "$root/usr/lib/stitkovac-gateway")" = 755
 test "$(dpkg-deb --field "$package" Architecture)" = arm64
-for binary in gateway gateway-launcher gateway-update check-storage; do
+for binary in gateway gateway-launcher gateway-update gateway-network check-storage; do
     test "$(stat -c %a "$root/usr/lib/stitkovac-gateway/$binary")" = 755
 done
 test ! -e "$root/usr/lib/stitkovac-gateway/gateway-release"

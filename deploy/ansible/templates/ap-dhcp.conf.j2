@@ -1,0 +1,12 @@
+# DHCP only, no DNS proxy, default route, NAT or durable client reservations.
+port=0
+interface={{ gateway_wifi_interface }}
+listen-address={{ gateway_ap_address }}
+bind-interfaces
+except-interface=lo
+dhcp-range={{ gateway_ap_first }},{{ gateway_ap_last }},255.255.255.0,10m
+dhcp-option=3
+dhcp-option=6
+dhcp-authoritative
+dhcp-leasefile=/run/stitkovac-gateway-ap/dnsmasq.leases
+pid-file=

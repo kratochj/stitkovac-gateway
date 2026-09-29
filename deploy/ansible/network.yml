@@ -1,0 +1,423 @@
+---
+# Run on a prepared image with / writable, before customer operation. Never run
+# this playbook on the VirtualBox NAT lab or through the Wi-Fi being configured.
+- name: Provision isolated Raspberry Pi network administration
+  hosts: gateways
+  become: true
+  gather_facts: true
+  vars:
+    gateway_network_binary: "{{ playbook_dir }}/../../bin/gateway-network-linux-arm64"
+    gateway_wifi_interface: wlan0
+    gateway_printer_interface: eth0
+    gateway_printer_address: 192.168.77.1
+    gateway_printer_prefix: "{{ gateway_prefix_length | default(24) }}"
+    gateway_ap_address: 192.168.78.1
+    gateway_ap_network: 192.168.78.0/24
+    gateway_ap_first: 192.168.78.50
+    gateway_ap_last: 192.168.78.199
+    gateway_country: CZ
+    gateway_gpio_chip: ''
+    gateway_gpio_line: 17
+  tasks:
+    - name: Require explicit offline appliance provisioning
+      ansible.builtin.assert:
+        that:
+          - gateway_network_provision | default(false) | bool
+          - ansible_facts.system == 'Linux'
+          - ansible_facts.architecture == 'aarch64'
+          - gateway_wifi_interface is match('^[a-zA-Z0-9_-]{1,15}$')
+          - gateway_printer_interface is match('^[a-zA-Z0-9_-]{1,15}$')
+          - gateway_wifi_interface != gateway_printer_interface
+          - gateway_country is match('^[A-Z]{2}$')
+          - gateway_gpio_chip == '' or gateway_gpio_chip is match('^/dev/gpiochip[0-9]+$')
+        fail_msg: Use the local console on a prepared RPi image and set gateway_network_provision=true.
+
+    - name: Validate IPv4 ranges and addresses before rendering system configuration
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import ipaddress, sys
+            printer = ipaddress.ip_interface(sys.argv[1])
+            ap = ipaddress.ip_interface(sys.argv[2])
+            net = ipaddress.ip_network(sys.argv[3])
+            first, last = map(ipaddress.ip_address, sys.argv[4:6])
+            assert printer.version == ap.version == 4
+            assert printer.ip.is_private and ap.ip.is_private
+            assert 16 <= printer.network.prefixlen <= 29
+            assert ap.network == net and net.prefixlen == 24
+            assert not printer.network.overlaps(net)
+            assert printer.ip not in (printer.network.network_address, printer.network.broadcast_address)
+            assert ap.ip not in (net.network_address, net.broadcast_address)
+            assert first in net and last in net and net.network_address < first <= last < net.broadcast_address
+            assert not first <= ap.ip <= last
+          - "{{ gateway_printer_address }}/{{ gateway_printer_prefix }}"
+          - "{{ gateway_ap_address }}/24"
+          - "{{ gateway_ap_network }}"
+          - "{{ gateway_ap_first }}"
+          - "{{ gateway_ap_last }}"
+      changed_when: false
+      check_mode: false
+
+    - name: Inspect gateway state
+      ansible.builtin.command:
+        argv: [systemctl, is-active, stitkovac-gateway]
+      register: gateway_active
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Require stopped printing
+      ansible.builtin.assert:
+        that: gateway_active.stdout | trim != 'active'
+
+    - name: Inspect existing network services
+      ansible.builtin.service_facts:
+
+    - name: Stop the existing controller during offline provisioning
+      ansible.builtin.systemd_service:
+        name: stitkovac-gateway-network
+        state: stopped
+      when: "'stitkovac-gateway-network.service' in ansible_facts.services"
+
+    - name: Inspect persistent storage
+      ansible.builtin.command:
+        argv: [findmnt, --noheadings, --mountpoint, /data, --output, FSTYPE]
+      register: gateway_network_mount
+      changed_when: false
+      check_mode: false
+
+    - name: Require prepared persistent storage
+      ansible.builtin.assert:
+        that: gateway_network_mount.stdout | trim == 'ext4'
+
+    - name: Install the network stack
+      ansible.builtin.apt:
+        name: [network-manager, iw, dnsmasq-base, nftables]
+        state: present
+        update_cache: true
+
+    - name: Read service account IDs
+      ansible.builtin.getent:
+        database: passwd
+        key: stitkovac-gateway
+
+    - name: Create root-only persistent network directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop: [/data/network, /data/network/profiles, /data/network/nm-state]
+
+    - name: Create installation directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /etc/NetworkManager/conf.d
+        - /etc/systemd/system/NetworkManager.service.d
+        - /etc/systemd/system/stitkovac-gateway.service.d
+        - /etc/nftables.d
+
+    - name: Keep bind mount targets private on repeated provisioning
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop: [/etc/NetworkManager/system-connections, /var/lib/NetworkManager]
+
+    - name: Install profile bind mount
+      ansible.builtin.copy:
+        dest: '/etc/systemd/system/etc-NetworkManager-system\x2dconnections.mount'
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Persistent NetworkManager profiles
+          RequiresMountsFor=/data
+          Before=NetworkManager.service
+          [Mount]
+          What=/data/network/profiles
+          Where=/etc/NetworkManager/system-connections
+          Type=none
+          Options=bind
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Install NetworkManager state bind mount
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/var-lib-NetworkManager.mount
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Persistent NetworkManager runtime state
+          RequiresMountsFor=/data
+          Before=NetworkManager.service
+          [Mount]
+          What=/data/network/nm-state
+          Where=/var/lib/NetworkManager
+          Type=none
+          Options=bind
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Require persistence before NetworkManager starts
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/NetworkManager.service.d/gateway.conf
+        mode: '0644'
+        content: |
+          [Unit]
+          RequiresMountsFor=/etc/NetworkManager/system-connections /var/lib/NetworkManager
+
+    - name: Configure appliance interfaces and volatile DNS
+      ansible.builtin.copy:
+        dest: /etc/NetworkManager/conf.d/90-stitkovac-gateway.conf
+        mode: '0644'
+        content: |
+          [main]
+          plugins=keyfile
+          no-auto-default=*
+          dns=default
+          rc-manager=file
+          [keyfile]
+          unmanaged-devices=*,except:interface-name:{{ gateway_wifi_interface }},except:interface-name:{{ gateway_printer_interface }}
+          [connectivity]
+          enabled=false
+
+    - name: Use the NetworkManager resolver in runtime memory
+      ansible.builtin.file:
+        src: /run/NetworkManager/resolv.conf
+        dest: /etc/resolv.conf
+        state: link
+        force: true
+
+    - name: Install dedicated printer profile without a default route
+      ansible.builtin.copy:
+        dest: /data/network/profiles/stitkovac-printers.nmconnection
+        owner: root
+        group: root
+        mode: '0600'
+        content: |
+          [connection]
+          id=stitkovac-printers
+          uuid=f204772e-0c89-4b94-9e18-f39ad0650fdd
+          type=ethernet
+          interface-name={{ gateway_printer_interface }}
+          autoconnect=true
+          [ethernet]
+          [ipv4]
+          method=manual
+          address1={{ gateway_printer_address }}/{{ gateway_printer_prefix }}
+          never-default=true
+          [ipv6]
+          method=disabled
+
+    - name: Preserve existing unique service AP credentials
+      ansible.builtin.stat:
+        path: /data/network/ap-credentials.json
+      register: gateway_ap_credentials
+
+    - name: Generate unique service AP credentials locally on the appliance
+      when: not gateway_ap_credentials.stat.exists and not ansible_check_mode
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import json, os, secrets, uuid
+            data = {'ssid': 'Stitkovac-GW-' + secrets.token_hex(3), 'password': secrets.token_urlsafe(24), 'id': str(uuid.uuid4())}
+            path = '/data/network/ap-credentials.json'
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, 'w') as f:
+                json.dump(data, f)
+                f.flush()
+                os.fsync(f.fileno())
+            fd = os.open('/data/network', os.O_RDONLY)
+            os.fsync(fd)
+            os.close(fd)
+      no_log: true
+
+    - name: Read private service AP credentials
+      ansible.builtin.slurp:
+        src: /data/network/ap-credentials.json
+      register: gateway_ap_secret
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: Install root network configuration
+      ansible.builtin.copy:
+        dest: /etc/stitkovac-gateway/network.json
+        owner: root
+        group: root
+        mode: '0600'
+        content: "{{ gateway_network_config | combine({'agentUID': getent_passwd['stitkovac-gateway'][1] | int, 'agentGID': getent_passwd['stitkovac-gateway'][2] | int, 'gpioLine': gateway_gpio_line | int}) | to_nice_json }}"
+      vars:
+        secret: "{{ gateway_ap_secret.content | b64decode | from_json }}"
+        gateway_network_config:
+          dataDir: /data/network
+          profileDir: /etc/NetworkManager/system-connections
+          wifiInterface: "{{ gateway_wifi_interface }}"
+          printerInterface: "{{ gateway_printer_interface }}"
+          printerCIDR: "{{ gateway_printer_address }}/{{ gateway_printer_prefix }}"
+          apCIDR: "{{ gateway_ap_address }}/24"
+          apSSID: "{{ secret.ssid }}"
+          apPassword: "{{ secret.password }}"
+          apID: "{{ secret.id }}"
+          country: "{{ gateway_country }}"
+          agentUID: "{{ getent_passwd['stitkovac-gateway'][1] | int }}"
+          agentGID: "{{ getent_passwd['stitkovac-gateway'][2] | int }}"
+          gpioChip: "{{ gateway_gpio_chip }}"
+          gpioLine: "{{ gateway_gpio_line | int }}"
+          simulation: false
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: Install network helper
+      ansible.builtin.copy:
+        src: "{{ gateway_network_binary }}"
+        dest: /usr/lib/stitkovac-gateway/gateway-network
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Validate complete helper configuration
+      ansible.builtin.command:
+        argv: [/usr/lib/stitkovac-gateway/gateway-network, --check]
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Extend the existing web certificate for the service AP address
+      become_user: stitkovac-gateway
+      ansible.builtin.command:
+        argv:
+          - /usr/lib/stitkovac-gateway/gateway
+          - certificate
+          - --ap-admin-address
+          - "{{ gateway_ap_address }}:8443"
+          - --printer-address
+          - "{{ gateway_printer_address }}/{{ gateway_printer_prefix }}"
+          - --pool-first
+          - "{{ gateway_pool_first | default('192.168.77.50') }}"
+          - --pool-last
+          - "{{ gateway_pool_last | default('192.168.77.199') }}"
+      register: gateway_network_certificate
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Show public certificate fingerprint for the installation record
+      ansible.builtin.debug:
+        msg: "{{ gateway_network_certificate.stdout }}"
+      when: not ansible_check_mode
+
+    - name: Install network helper service
+      ansible.builtin.copy:
+        src: ../systemd/stitkovac-gateway-network.service
+        dest: /etc/systemd/system/stitkovac-gateway-network.service
+        mode: '0644'
+
+    - name: Install isolated service AP DHCP configuration
+      ansible.builtin.template:
+        src: ap-dhcp.conf.j2
+        dest: /etc/stitkovac-gateway/ap-dhcp.conf
+        mode: '0644'
+
+    - name: Install service AP DHCP unit without enabling it at boot
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/stitkovac-gateway-ap-dhcp.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Stitkovac temporary service AP DHCP
+          After=NetworkManager.service
+          [Service]
+          Type=simple
+          User=stitkovac-gateway
+          Group=stitkovac-gateway
+          AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_NET_ADMIN
+          ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/stitkovac-gateway/ap-dhcp.conf
+          RuntimeDirectory=stitkovac-gateway-ap
+          RuntimeDirectoryMode=0755
+          RuntimeDirectoryPreserve=no
+          UMask=0022
+          NoNewPrivileges=true
+          ProtectSystem=strict
+          ProtectHome=true
+          PrivateTmp=true
+          ReadWritePaths=/run/stitkovac-gateway-ap
+          CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
+          RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+          Restart=on-failure
+
+    - name: Install firewall rules
+      ansible.builtin.template:
+        src: gateway-network.nft.j2
+        dest: /etc/nftables.d/stitkovac-gateway.nft
+        mode: '0644'
+        validate: /usr/sbin/nft --check --file %s
+
+    - name: Include appliance firewall rules
+      ansible.builtin.lineinfile:
+        path: /etc/nftables.conf
+        line: 'include "/etc/nftables.d/stitkovac-gateway.nft"'
+        create: true
+        mode: '0644'
+
+    - name: Disable forwarding
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/90-stitkovac-gateway.conf
+        mode: '0644'
+        content: |
+          net.ipv4.ip_forward=0
+          net.ipv6.conf.all.forwarding=0
+
+    - name: Disable swap entries for read-only operation
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^(?!#)(\S+\s+\S+\s+swap\s+.*)$'
+        replace: '# Disabled for gateway: \1'
+
+    - name: Require network isolation before serving administration
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/stitkovac-gateway.service.d/network.conf
+        mode: '0644'
+        content: |
+          [Unit]
+          Requires=nftables.service stitkovac-gateway-network.service
+          After=nftables.service stitkovac-gateway-network.service
+          [Service]
+          ExecStart=
+          ExecStart=/usr/lib/stitkovac-gateway/gateway serve --data-dir /data/gateway $GATEWAY_ARGS --ap-admin-address {{ gateway_ap_address }}:8443
+
+    - name: Inspect installed services
+      ansible.builtin.service_facts:
+
+    - name: Disable conflicting legacy network managers and swap services
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: false
+        masked: true
+      loop: [dhcpcd.service, systemd-networkd.service, dphys-swapfile.service]
+      when: item in ansible_facts.services
+
+    - name: Enable provisioned services for next boot without disrupting provisioning
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        daemon_reload: true
+      loop:
+        - 'etc-NetworkManager-system\x2dconnections.mount'
+        - var-lib-NetworkManager.mount
+        - NetworkManager.service
+        - nftables.service
+        - stitkovac-gateway-network.service
+
+    - name: Report required image finalization
+      ansible.builtin.debug:
+        msg: Restore read-only root and boot mounts before reboot. Service AP credentials are root-only in /data/network/ap-credentials.json. Keep console access for the first hardware test.

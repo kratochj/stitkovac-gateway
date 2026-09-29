@@ -242,8 +242,8 @@ přepínání do AP; agent pokračuje v obnově uplinku.
 
 Servisní AP již funkční brány lze zapnout dlouhým stiskem samostatného GPIO
 tlačítka nebo z webu při ethernetovém připojení. Tlačítko není vestavěnou funkcí
-Pi 3 B+; jeho zapojení je součástí budoucího instalačního návodu. AP má časový
-limit, například 15 minut nečinnosti, a při jeho spuštění je cloudové spojení offline.
+Pi 3 B+; zapojení popisuje [síťový instalační návod](network-administration.md).
+Implementace používá pětisekundový stisk a pevný limit AP 15 minut od aktivace, a při jeho spuštění je cloudové spojení offline.
 
 ## 5. Lokální administrační web
 
@@ -533,7 +533,9 @@ Detailní servisní údaje a přístupy zůstávají superadminovi a technikovi.
 
 Ansible je nástroj pro přípravu a údržbu systému. Lokální web není frontend pro
 spouštění libovolných playbooků. Wi-Fi za běhu mění přes omezeného pomocníka
-využívajícího NetworkManager D-Bus API. Ověří se konkrétní chování v připnutém
+využívajícího NetworkManager přes pevně omezené příkazy `nmcli` (jeho D-Bus klient).
+Implementace 0.1.4 a ověření jsou popsané v [síťové administraci](network-administration.md).
+Ověří se konkrétní chování v připnutém
 OS image včetně případné výchozí konfigurace přes Netplan.
 
 | Vlastník | Spravovaná data |
