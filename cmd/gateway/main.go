@@ -176,29 +176,39 @@ func run(args []string) error {
 		if spool != nil {
 			defer spool.Close()
 		}
-		var cloudClient *cloud.Client
-		if *cloudURL != "" || *tokenFile != "" {
-			if *device == "" || *cloudURL == "" || *tokenFile == "" {
-				return errors.New("cloud requires URL, token file and dedicated printer interface")
+		cfg, configured, err := cloud.LoadConfig(*dir)
+		if err != nil {
+			return err
+		}
+		if !configured && (*cloudURL != "" || *tokenFile != "") {
+			if *cloudURL == "" || *tokenFile == "" {
+				return errors.New("cloud requires URL and token file")
 			}
 			token, err := readToken(*tokenFile)
 			if err != nil {
 				return err
 			}
-			id, _, err := s.Identity()
-			if err != nil {
-				return err
-			}
-			worker := &printing.Worker{Store: s, Pool: pool, Dial: printing.Dialer(*device)}
-			cloudClient, err = cloud.New(*cloudURL, token, id, version, worker, nil, report)
+			cfg, err = cloud.NormalizeConfig(*cloudURL, token)
 			if err != nil {
 				return err
 			}
 		}
+		if cfg.Token != "" && *device == "" {
+			return errors.New("cloud requires a dedicated printer interface")
+		}
+		worker := &printing.Worker{Store: s, Pool: pool, Dial: printing.Dialer(*device)}
+		cloudManager := cloud.NewManager(*dir, cfg, func(cfg cloud.Config, observe func(string)) (cloud.Connection, error) {
+			client, err := cloud.New(cfg.URL, cfg.Token, id, version, worker, nil, report)
+			if err != nil {
+				return nil, err
+			}
+			client.OnState = observe
+			return client, nil
+		})
 		if spool != nil {
 			var send func(context.Context, telemetry.Event) error
-			if cloudClient != nil {
-				send = cloudClient.Report
+			if *device != "" {
+				send = cloudManager.Report
 			}
 			eventStopped := make(chan struct{})
 			go func() { defer close(eventStopped); spool.Run(ctx, events, send) }()
@@ -207,6 +217,9 @@ func run(args []string) error {
 		web, err := admin.New(s, *adminAddress, version)
 		if err != nil {
 			return err
+		}
+		if *device != "" {
+			web.Cloud = cloudManager
 		}
 		server := &http.Server{Addr: *adminAddress, Handler: web.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
 		certificate, err := tls.LoadX509KeyPair(filepath.Join(*dir, "tls.crt"), filepath.Join(*dir, "tls.key"))
@@ -249,8 +262,8 @@ func run(args []string) error {
 			return err
 		}
 		cloudStopped := make(chan struct{})
-		if cloudClient != nil {
-			go func() { defer close(cloudStopped); cloudClient.Run(ctx) }()
+		if *device != "" {
+			go func() { defer close(cloudStopped); cloudManager.Run(ctx) }()
 		} else {
 			close(cloudStopped)
 		}

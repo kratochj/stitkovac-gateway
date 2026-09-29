@@ -30,7 +30,7 @@ if '"VirtioSCSI-2-0"="none"' not in result.stdout:
                     '--port', '2', '--device', '0', '--type', 'dvddrive', '--medium', 'none'], check=True)
 subprocess.run(['VBoxManage', 'export', CONFIG['name'], '--output', str(archive),
                 '--ovf20', '--manifest', '--vsys', '0', '--product', 'Stitkovac Gateway Lab',
-                '--version', '0.1.1', '--description', 'ARM64 Debian lab with isolated WSS server and DHCP/TCP PDF printer simulator.'], check=True)
+                '--version', '0.1.2', '--description', 'ARM64 Debian lab with isolated WSS server and DHCP/TCP PDF printer simulator.'], check=True)
 with archive.open('rb') as handle:
     digest = hashlib.file_digest(handle, 'sha256').hexdigest()
 archive.with_suffix('.ova.sha256').write_text(digest + '  ' + archive.name + '\n')

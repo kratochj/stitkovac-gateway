@@ -24,6 +24,38 @@ try {
   assert.equal(origin, base, 'The browser must retain the same origin on form submission');
   await page.waitForURL(base + '/');
   assert.match(await page.locator('body').innerText(), /DHCP rezervace/);
+  if (process.argv.includes('--configure-lab')) {
+    // Never replace a real server's settings as a side effect of this lab test.
+    assert.equal(await page.locator('#server_url').inputValue(), 'https://127.0.0.1:9443');
+    const save = async token => {
+      await page.locator('#token').fill(token);
+      const response = page.waitForResponse(r => r.url() === base + '/cloud' && r.request().method() === 'POST');
+      await page.locator('form[action="/cloud"] button').click();
+      assert.equal((await response).status(), 303);
+      await page.waitForURL(base + '/?cloud=saved#cloud');
+      assert.equal(await page.locator('#token').inputValue(), '');
+      assert(!(await page.content()).includes(credentials.gateway_lab_token), 'Stored token leaked into HTML');
+    };
+    const waitState = async expected => {
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await page.reload();
+        if ((await page.locator('#cloud-state').innerText()).includes(expected)) return;
+        await page.waitForTimeout(250);
+      }
+      assert.fail('Connection state did not reach ' + expected);
+    };
+    try {
+      await save('invalid-lab-token-'.repeat(4));
+      await waitState('Server odmítl přístup');
+    } finally {
+      await save(credentials.gateway_lab_token);
+    }
+    await waitState('Připojeno k serveru');
+    await save('');
+    await waitState('Připojeno k serveru');
+    await page.screenshot({ path: new URL('../../dist/virtualbox/cloud-settings.png', import.meta.url).pathname, fullPage: true });
+    console.log('Credential rejection, replacement, reconnect and blank-token retention passed.');
+  }
   const logoutResponse = page.waitForResponse(r => r.url() === base + '/logout' && r.request().method() === 'POST');
   await page.locator('form[action="/logout"] button').click();
   assert.equal((await logoutResponse).status(), 303, 'Browser logout must succeed');

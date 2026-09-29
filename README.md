@@ -25,6 +25,7 @@ Chyby se hlásí do Rollbaru přes server Štítkovače.
 - SQLite WAL/FULL journal a obnova nejistých tiskových pokusů bez automatického opakování.
 - DHCPv4 s trvalou MAC/IP rezervací před OFFER a záznamem lease před ACK.
 - HTTPS servisní přihlášení s Argon2id a přehled nalezených zařízení.
+- Nastavení serveru a tokenu ve webu, trvalé uložení a přepnutí WSS spojení bez restartu.
 - Odchozí WSS, obnovování spojení, HTTPS claim/download/start/result a RAW TCP tisk.
 - Omezená trvalá fronta očištěných chyb pro serverový Rollbar relay.
 - Podepsaná vydání, trvalý výběr verze, launcher s readiness a automatickým rollbackem.

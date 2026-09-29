@@ -2,6 +2,26 @@
 <html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Zařízení – Štítkovač Gateway</title><link rel="stylesheet" href="/static/style.css"></head>
 <body><header><strong>Štítkovač Gateway</strong><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Odhlásit se</button></form></header>
 <main><h1>Zařízení na tiskové síti</h1><p class="identity">Brána <code>{{.ID}}</code> <span>Verze {{.Version}}</span></p>
+<section id="cloud" class="cloud-settings" aria-labelledby="cloud-title">
+<h2 id="cloud-title">Připojení k serveru</h2>
+{{if .Cloud}}
+<p id="cloud-state" role="status">{{if eq .Cloud.State "connected"}}<strong class="active">Připojeno k serveru</strong>{{else if eq .Cloud.State "unconfigured"}}Brána zatím není připojená.{{else if eq .Cloud.State "applying"}}Nastavení se používá. Probíhající přenos do tiskárny se nejprve dokončí.{{else if eq .Cloud.State "connecting"}}Připojuji se k serveru…{{else if eq .Cloud.State "unauthorized"}}<strong class="error">Server odmítl přístup. Ověřte adresu serveru a platnost tokenu brány.</strong>{{else if eq .Cloud.State "handshake_failed"}}<strong class="error">Server nepotvrdil připojení. Ověřte, že je na serveru registrované ID této brány a používáte její token.</strong>{{else}}<strong class="error">Připojení se nezdařilo. Ověřte adresu serveru, dostupnost internetu a certifikát serveru. Brána připojení zkusí znovu.</strong>{{end}}</p>
+<p>Na serveru v části Brány zaregistrujte ID uvedené nahoře. Sem vložte vydaný token brány; přihlašovací token uživatele nelze použít.</p>
+{{if .CloudSaved}}<p class="notice" role="status">Nastavení je uložené. Stav spojení ověříte obnovením přehledu.</p>{{end}}
+{{if .CloudError}}<p class="error" role="alert">{{.CloudError}}</p>{{end}}
+<form method="post" action="/cloud">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="server_url">Adresa serveru</label>
+<input id="server_url" name="server_url" type="url" value="{{.Cloud.URL}}" required maxlength="2048" spellcheck="false" autocapitalize="none" aria-describedby="server-help">
+<small id="server-help">Například https://cloud.stitkovac.app, bez /api a další cesty.</small>
+<label for="token">Token brány</label>
+<input id="token" name="token" type="password" autocomplete="off" minlength="32" maxlength="4096" spellcheck="false" autocapitalize="none" {{if not .Cloud.TokenSet}}required{{end}} aria-describedby="token-help">
+<small id="token-help">{{if .Cloud.TokenSet}}Token je uložený. Prázdné pole jej ponechá pro stejný server. Při změně adresy vložte nový token.{{else}}Vložte token vydaný při registraci této brány.{{end}} Uložený token se znovu nezobrazuje.</small>
+<button type="submit">Uložit a připojit</button>
+</form>
+{{else}}<p>Nejdříve při instalaci nastavte síťové rozhraní tiskáren. Potom zde můžete připojit bránu k serveru.</p>{{end}}
+<a class="refresh" href="/#cloud">Obnovit stav připojení</a>
+</section>
 <aside><strong>Adresy zůstávají rezervované</strong><p>Každé zařízení při dalším připojení dostane stejnou IP adresu. Aktivní lease potvrzuje přidělení adresy, nikoli připravenost tiskárny.</p></aside>
 <div class="table-wrap"><table><caption>DHCP rezervace</caption><thead><tr><th scope="col">MAC adresa</th><th scope="col">IP adresa</th><th scope="col">Stav</th></tr></thead><tbody>
 {{range .Devices}}<tr><td><code>{{.MAC}}</code></td><td><code>{{.IP}}</code></td><td>{{if .Declined}}<span class="error">Konflikt adresy – vyžaduje servis</span>{{else if gt .LeaseUntil $.Now}}<span class="active">Aktivní lease</span>{{else}}Rezervováno{{end}}</td></tr>{{else}}<tr><td colspan="3" class="empty">Zatím není přidělená žádná adresa. Připojte tiskárnu v režimu DHCP k ethernetovému portu brány nebo k jejímu switchi.</td></tr>{{end}}

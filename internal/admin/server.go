@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"errors"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kratochj/stitkovac-gateway/internal/auth"
+	"github.com/kratochj/stitkovac-gateway/internal/cloud"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
 )
 
@@ -22,7 +24,11 @@ type session struct {
 	Expires time.Time
 }
 type Server struct {
-	Store                   *state.Store
+	Store *state.Store
+	Cloud interface {
+		Status() cloud.Status
+		Save(string, string) error
+	}
 	Host, Version           string
 	mu                      sync.Mutex
 	sessions                map[[32]byte]session
@@ -46,6 +52,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) { s.render(w, "login.html", nil) })
 	mux.HandleFunc("POST /login", s.login)
 	mux.HandleFunc("POST /logout", s.logout)
+	mux.HandleFunc("POST /cloud", s.configureCloud)
 	mux.HandleFunc("GET /{$}", s.index)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -65,7 +72,7 @@ func (s *Server) Handler() http.Handler {
 			http.Error(w, "Neplatný původ požadavku.", http.StatusForbidden)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 		mux.ServeHTTP(w, r)
 	})
 }
@@ -152,6 +159,40 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
+	s.dashboard(w, r, "")
+}
+
+func (s *Server) configureCloud(w http.ResponseWriter, r *http.Request) {
+	v, ok := s.authenticate(r)
+	if !ok {
+		http.Error(w, "Přihlaste se znovu.", http.StatusUnauthorized)
+		return
+	}
+	if err := r.ParseForm(); err != nil || subtle.ConstantTimeCompare([]byte(r.Form.Get("csrf")), []byte(v.CSRF)) != 1 {
+		http.Error(w, "Neplatný formulář.", http.StatusForbidden)
+		return
+	}
+	if s.Cloud == nil {
+		http.Error(w, "Není nastavené síťové rozhraní tiskáren.", http.StatusConflict)
+		return
+	}
+	if err := s.Cloud.Save(r.Form.Get("server_url"), r.Form.Get("token")); err != nil {
+		message := "Nastavení se nepodařilo uložit. Zkontrolujte datové úložiště brány."
+		switch {
+		case errors.Is(err, cloud.ErrAddress):
+			message = "Zadejte HTTPS adresu serveru bez /api, přihlašovacích údajů a další cesty."
+		case errors.Is(err, cloud.ErrToken):
+			message = "Vložte celý token brány (32–4096 znaků, bez mezer)."
+		case errors.Is(err, cloud.ErrNewTokenRequired):
+			message = "Pro první připojení nebo změnu serveru vložte token vydaný pro tuto bránu na daném serveru."
+		}
+		s.dashboard(w, r, message)
+		return
+	}
+	http.Redirect(w, r, "/?cloud=saved#cloud", http.StatusSeeOther)
+}
+
+func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, cloudError string) {
 	v, ok := s.authenticate(r)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -162,9 +203,20 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Evidence zařízení není dostupná. Tisk pozastavte a zkontrolujte úložiště.", http.StatusServiceUnavailable)
 		return
 	}
+	var connection *cloud.Status
+	if s.Cloud != nil {
+		status := s.Cloud.Status()
+		if status.URL == "" {
+			status.URL = "https://cloud.stitkovac.app"
+		}
+		connection = &status
+	}
 	s.render(w, "index.html", struct {
 		ID, Version, CSRF string
 		Now               int64
 		Devices           []state.Reservation
-	}{s.gatewayID, s.Version, v.CSRF, time.Now().Unix(), reservations})
+		Cloud             *cloud.Status
+		CloudError        string
+		CloudSaved        bool
+	}{s.gatewayID, s.Version, v.CSRF, time.Now().Unix(), reservations, connection, cloudError, r.URL.Query().Get("cloud") == "saved"})
 }

@@ -80,11 +80,35 @@ instalace `.deb` netvoří plně připravenou bránu: účet, runtime konfigurac
 úložiště a inicializace jsou odpovědností provisioningu. Balíček službu sám
 nespouští, neobsahuje hesla, tokeny ani univerzální identitu.
 
-## Připojení testovacího cloudu
+## Připojení k serveru
+
+Od buildu 0.1.2 nastavíte připojení v lokální administraci v části
+**Připojení k serveru**:
+
+1. Zkopírujte ID brány z horní části stránky.
+2. V administraci serveru v části **Brány** zaregistrujte toto ID a vydejte token.
+3. V lokálním webu nastavte `https://cloud.stitkovac.app` a vložte token brány.
+4. Zvolte **Uložit a připojit**, potom obnovte stav připojení.
+
+Uložení a připojení jsou dva různé výsledky: zelený stav **Připojeno k serveru**
+potvrzuje dokončený WSS handshake. Při odmítnutí přístupu ověřte token;
+při odmítnutí handshake také shodu registrovaného ID. Lokální přihlášení
+zůstává dostupné i s neplatným cloudovým tokenem.
+
+Konfigurace se atomicky ukládá do `/data/gateway/cloud.json` s oprávněním 0600
+a fsync souboru i adresáře. Přežije restart read-only systému. Token se nevypisuje
+do HTML ani diagnostiky. Prázdné pole ponechá uložený token pouze pro stejnou
+adresu serveru; při změně adresy je nutné vložit token znovu.
+Uložená konfigurace má přednost před instalačními přepínači. Nové připojení
+se použije bez restartu agenta nebo DHCP; před spuštěním nového cloudového
+workeru se ukončí staré spojení a dokončí již autorizovaný místní TCP přenos.
+Nevyřešená evidence tisku se nemaže.
 
 Volitelné přepínače `--cloud-url` a `--cloud-token-file` vyžadují také
 `--dhcp-interface`. Token je v samostatném souboru s režimem 0600 a patří
-konkrétní bráně. URL musí poskytovat [protokol v1](protocol-v1.md).
+konkrétní bráně. Slouží jako výchozí nastavení před prvním uložením z webu.
+URL musí poskytovat [protokol v1](protocol-v1.md). Síťové rozhraní tiskáren
+musí být připravené už při instalaci; web jej zatím nekonfiguruje.
 Produkční server od 2.7.12 protokol poskytuje; použijte token vytvořený
 v administraci bran. Běžný uživatelský JWT není tokenem brány.
 

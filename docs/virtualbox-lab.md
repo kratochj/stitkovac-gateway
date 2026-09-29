@@ -32,6 +32,15 @@ Z Terminálu lze použít i `python3 scripts/virtualbox/start.py --open`.
 
 ## Co se skutečně testuje
 
+Build **0.1.2** přidává do administrace **Připojení k serveru**. Lze nastavit
+produkční adresu `https://cloud.stitkovac.app` a token vydaný na serveru pro ID
+této brány. Postup je v [instalaci](installation.md#připojení-k-serveru).
+Tím brána přejde z lokálního simulátoru na skutečný server; simulovaná tiskárna
+zůstává připojená na stejné MAC/IP. Tlačítka laboratoře potom neposílají úlohy
+do této brány. Pro návrat nastavte `https://127.0.0.1:9443` a token z položky
+`gateway_lab_token` v soukromém `dist/virtualbox/credentials.json`.
+Uložené nastavení přetrvá restart a má přednost před parametry z instalace.
+
 ```text
 Prohlížeč → SSH tunel → lokální HTTPS/WSS simulátor serveru
                                     ↓ oznámení nové úlohy
@@ -92,6 +101,10 @@ nevypisuje ho a nemění systémové úložiště certifikátů:
 npm install --prefix .cache/browser-tests --no-audit --no-fund --ignore-scripts playwright-core@1.58.2
 GATEWAY_TEST_CHROMIUM=/absolute/path/to/chromium node scripts/virtualbox/smoke-browser.mjs
 ```
+
+Volba `--configure-lab` navíc ověří odmítnutí neplatného tokenu, uložení správného
+tokenu, obnovení WSS spojení a ponechání tokenu při prázdném poli. Použijte ji
+pouze proti lokálnímu simulátoru; test odmítne přepsat konfiguraci jiného serveru.
 
 Simulátor uchovává nejvýše 100 úloh a posledních 50 zachycených dokumentů.
 `SENT` znamená úspěšné předání bajtů TCP simulátoru, ne důkaz fyzického tisku.
