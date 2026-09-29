@@ -244,8 +244,9 @@ Staré úlohy bez časových údajů ukazují „Čas nebyl zaznamenán“. Nov�
 trvale uložený čas vytvoření a poslední změny stavu.
 
 Tato oprava patří do **gateway-lab**, nikoli do OTA balíčku agenta 0.1.6.
-Je připravená ve zdrojích a ARM64 binárce `bin/gateway-lab-linux-arm64`;
-běžící VM ani server nebyly při této opravě aktualizované.
+[Balíček 0.1.7](releases/0.1.7.md) obsahuje verzi laboratoře s touto opravou
+a ruční Ansible spouštěč. Agent OTA a servisní upgrade laboratoře jsou oddělené;
+běžící VM ani server nebyly při přípravě tohoto balíčku aktualizované.
 
 Regrese: `go test -race ./internal/lab`, Go vet a ARM64 build pomocného procesu.
 Volitelný prohlížečový test používá oddělený dočasný HTTPS server a TCP tiskárnu
