@@ -515,8 +515,13 @@ Detail brány obsahuje:
   odkazu na odpovídající Rollbar item, pokud už byl přijat.
 
 V první verzi superadmin může registrovat, přejmenovat, přiřadit tiskárnu,
-odvolat token a vyvolat testovací tisk. Řízený restart a aktualizace mohou být
-dalšími explicitními akcemi. Vzdálený shell ani tunel lokálního webu se nezavádí.
+odvolat token a vyvolat testovací tisk. Před první zákaznickou instalací musí
+umět také zvolit konkrétní vydanou verzi agenta a cílové brány pro OTA aktualizaci.
+Nejprve se aktualizuje jedna testovací brána; rozšíření na další zařízení je
+samostatná explicitní akce po ověření výsledku. Přehled ukazuje požadovanou
+a skutečnou verzi, fázi aktualizace, výsledek health checku a případný rollback.
+Každý pokyn má jedinečné ID pro idempotenci a audit se superadminem, cílovou
+bránou, verzí a časem. Offline brány vykonají stále platný pokyn až po připojení. Vzdálený shell ani tunel lokálního webu se nezavádí.
 Telemetrie hlásí změny a omezené periodické souhrny; nepřenáší dokumenty ani tajné údaje.
 
 Běžní uživatelé vidí stav vlastního tisku a dostupnost příslušné tiskárny.
@@ -575,7 +580,15 @@ a aplikační bundle z pevně povoleného repozitáře přes HTTPS. Nepřijímá
 URL ani příkaz ze zprávy. Aplikační bundle obsahuje běhové soubory ze stejného
 release jako instalační `.deb`, ne spustitelné instalační hooky. Verze se ukládají
 do samostatných adresářů na `/data`; spuštění zajišťuje stabilní systémový launcher.
-V první fázi tentýž postup aktivace provádí technik lokálně přes Ansible.
+OTA agenta a jeho vloženého lokálního webu je povinná před prvním nasazením
+u zákazníka. Ansible slouží k prvotnímu provisioningu a servisní obnově;
+vzdálená aktualizace nevyžaduje Ansible ani dosažitelnost brány přes SSH.
+Launcher a jeho důvěryhodné veřejné podpisové klíče jsou součástí připraveného
+read-only systému. Podpisový privátní klíč není na bráně ani na aplikačním serveru.
+Manifest váže verzi, cílovou platformu, délku a SHA-256 artefaktu i požadovanou
+verzi launcheru. Neplatný podpis, neznámý klíč, nekompatibilní platforma či
+nedostatek místa nesmějí ovlivnit běžící verzi. Běžný pokyn nepovoluje downgrade;
+návrat na poslední funkční verzi je samostatný řízený rollback.
 
 Aktualizace má stavy stažení, ověření, čekání na dokončení tisku, instalace a
 health check. Rozpracovaná verze nepřepisuje aktivní soubory. Po jejich úplném
@@ -583,8 +596,19 @@ uložení a ověření se trvale přepne manifest aktivní verze. Launcher obnov
 přerušení buď původní, nebo kompletní novou verzi; u nedokončeného zkušebního
 startu se vrátí předchozí verze. Stav aktualizace je trvalý, ne pouze v RAM.
 Migrace SQLite musí
-být kompatibilní s touto předchozí verzí nebo mít ověřený návrat bez ztráty
-záznamů o tisku. Neobnovovat slepě starý snapshot databáze po již provedeném tisku.
+být zpětně kompatibilní s předchozí verzí aplikace. Rollback přepíná pouze
+aplikační verzi; tiskový journal, DHCP rezervace a ostatní aktuální data se
+nikdy nevracejí ke starému databázovému snapshotu.
+
+Před aktivací brána přestane přijímat nové tiskové úlohy a dokončí rozpracované
+přenosy; nejasné výsledky se zachovají jako UNKNOWN. Launcher řídí omezený
+zkušební start a sám vrátí předchozí verzi, pokud proces skončí nebo v časovém
+limitu nepotvrdí lokální připravenost. Health check zahrnuje otevření aktuální
+DB, obnovu journalu, start DHCP a lokálního webu; výpadek internetu sám o sobě
+není důvodem rollbacku. Po potvrzení se teprve obnoví přijímání tisku.
+Vypnutí napájení v libovolné fázi musí zanechat spustitelnou kompletní verzi.
+Změny formátu stavu vyžadující novější launcher či nevratnou migraci patří do
+samostatného servisního vydání, ne do běžného aplikačního OTA.
 
 Aktualizace OS, kernelu, boot oddílu a privilegovaných systémových komponent se
 v první verzi provádí servisní výměnou za předem připravenou a ověřenou kartu
@@ -730,8 +754,10 @@ hardwarové spolehlivosti. U Rollbaru navíc ověřit offline frontu a redakci d
 2. Zafixovat gateway API, rozšíření serverové fronty a kompatibilitu app/kiosku.
 3. Implementovat bezpečné zpracování jedné tiskárny, lokální journal a WSS obnovu.
 4. Doplnit lokální web, více endpointů, registraci, superadmin přehled a Rollbar relay.
-5. Dodat Ansible provisioning, `.deb`, recovery postup a pilot u zákazníka.
-6. Doplnit řízené vzdálené aktualizace a případně distribuční SD image.
+5. Dodat Ansible provisioning, `.deb`, aplikační OTA s podpisy, nezávislým
+   launcherem a rollbackem; ověřit recovery včetně výpadků napájení.
+6. Provést pilot u zákazníka. Následně připravit případný distribuční SD image
+   a samostatně navržené A/B aktualizace celého OS.
 
 Před implementací dořešit přesné vydání OS, verze závislostí, DTO a limity
 dokumentů/fronty, způsob distribuce lokálních HTTPS certifikátů a konkrétní
