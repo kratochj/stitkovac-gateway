@@ -114,3 +114,8 @@ func (s *Store) Acknowledge(ctx context.Context, job, attempt, result string) er
 	r, err := s.db.ExecContext(ctx, "UPDATE attempts SET document=NULL WHERE job_uid=? AND attempt_id=? AND state=? AND state IN ('SENT','FAILED','EXPIRED')", job, attempt, result)
 	return changed(r, err)
 }
+
+func (s *Store) Expire(ctx context.Context, job, attempt string, now time.Time) error {
+	r, err := s.db.ExecContext(ctx, "UPDATE attempts SET state='EXPIRED',reason='expired_before_send' WHERE job_uid=? AND attempt_id=? AND state='CLAIMED' AND expires_at<=?", job, attempt, now.Unix())
+	return changed(r, err)
+}

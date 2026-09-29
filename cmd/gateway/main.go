@@ -20,8 +20,10 @@ import (
 
 	"github.com/kratochj/stitkovac-gateway/internal/admin"
 	"github.com/kratochj/stitkovac-gateway/internal/auth"
+	"github.com/kratochj/stitkovac-gateway/internal/cloud"
 	"github.com/kratochj/stitkovac-gateway/internal/dhcp"
 	"github.com/kratochj/stitkovac-gateway/internal/platform"
+	"github.com/kratochj/stitkovac-gateway/internal/printing"
 	"github.com/kratochj/stitkovac-gateway/internal/state"
 )
 
@@ -50,6 +52,8 @@ func run(args []string) error {
 	first := flags.String("pool-first", "192.168.77.50", "First DHCP address")
 	last := flags.String("pool-last", "192.168.77.199", "Last DHCP address")
 	device := flags.String("dhcp-interface", "", "Dedicated Linux printer interface; empty disables DHCP")
+	cloudURL := flags.String("cloud-url", "", "HTTPS origin implementing gateway API v1; empty disables cloud")
+	tokenFile := flags.String("cloud-token-file", "", "Private file containing the gateway token")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -150,6 +154,25 @@ func run(args []string) error {
 		if err := s.Recover(ctx, time.Now()); err != nil {
 			return err
 		}
+		var cloudClient *cloud.Client
+		if *cloudURL != "" || *tokenFile != "" {
+			if *device == "" || *cloudURL == "" || *tokenFile == "" {
+				return errors.New("cloud requires URL, token file and dedicated printer interface")
+			}
+			token, err := readToken(*tokenFile)
+			if err != nil {
+				return err
+			}
+			id, _, err := s.Identity()
+			if err != nil {
+				return err
+			}
+			worker := &printing.Worker{Store: s, Pool: pool, Dial: printing.Dialer(*device)}
+			cloudClient, err = cloud.New(*cloudURL, token, id, version, worker, nil, nil)
+			if err != nil {
+				return err
+			}
+		}
 		web, err := admin.New(s, *adminAddress, version)
 		if err != nil {
 			return err
@@ -164,6 +187,12 @@ func run(args []string) error {
 				result <- dhcp.Serve(ctx, *device, dhcp.Handler{Store: s, Pool: pool}, func(error) { slog.Warn("DHCP request failed; no address acknowledged") })
 			}()
 		}
+		cloudStopped := make(chan struct{})
+		if cloudClient != nil {
+			go func() { defer close(cloudStopped); cloudClient.Run(ctx) }()
+		} else {
+			close(cloudStopped)
+		}
 		slog.Info("Gateway services started", "version", version, "dhcpEnabled", *device != "")
 		select {
 		case err = <-result:
@@ -173,6 +202,7 @@ func run(args []string) error {
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		server.Shutdown(shutdown)
+		<-cloudStopped
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -180,4 +210,28 @@ func run(args []string) error {
 	default:
 		return errors.New("unknown command")
 	}
+}
+
+func readToken(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return "", errors.New("token file must be private (0600)")
+	}
+	b, err := io.ReadAll(io.LimitReader(f, 4098))
+	if err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(string(b))
+	if len(token) < 32 || len(token) > 4096 || strings.ContainsAny(token, "\r\n\t ") {
+		return "", errors.New("invalid gateway token")
+	}
+	return token, nil
 }
