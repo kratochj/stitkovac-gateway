@@ -1,0 +1,24 @@
+---
+- name: Build an unpersonalized gateway OS image on a dedicated ARM64 Linux host
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require explicitly pinned input and a new output image path
+      ansible.builtin.assert:
+        that:
+          - gateway_base_image is defined
+          - gateway_base_sha256 is match('^[0-9a-f]{64}$')
+          - gateway_output_image is defined
+    - name: Build the appliance image without touching physical disks
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../../scripts/image/build.py"
+          - --base
+          - "{{ gateway_base_image }}"
+          - --sha256
+          - "{{ gateway_base_sha256 }}"
+          - --output
+          - "{{ gateway_output_image }}"
+      when: not ansible_check_mode

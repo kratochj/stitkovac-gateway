@@ -1,0 +1,17 @@
+[Unit]
+Description=Initialize a unique Stitkovac gateway appliance
+After=local-fs.target
+Before=stitkovac-gateway.service stitkovac-gateway-network.service
+RequiresMountsFor=/data /boot/firmware
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/stitkovac-image/firstboot.py
+RemainAfterExit=yes
+TimeoutStartSec=600
+UMask=0077
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

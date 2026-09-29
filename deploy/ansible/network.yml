@@ -98,6 +98,8 @@
         state: present
         update_cache: true
 
+      when: gateway_install_network_packages | default(true) | bool
+
     - name: Read service account IDs
       ansible.builtin.getent:
         database: passwd

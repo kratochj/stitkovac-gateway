@@ -1,5 +1,7 @@
 # Příprava a ověření instalace
 
+Nově: [kompletní OS image](os-image.md) a [správa tiskáren, retence a přístupy](printer-operations.md).
+
 Tento postup je pro vývojovou bránu. Od verze 0.1.4 navazuje samostatný
 [provisioning Wi-Fi, servisního AP a firewallu](network-administration.md). Serverové endpointy a webová registrace jsou implementované
 a nasazené na `cloud.stitkovac.app` ve verzi **2.7.12** od 2026-09-29.
@@ -41,8 +43,7 @@ ovládání přes server a provisioning klíčů ještě nejsou propojené.
 ## Read-only systém a aktivace
 
 Na konkrétním image je nutné před aktivací ověřit boot/system read-only režim,
-RAM OverlayFS a oddělený `/data`. Příprava oddílů a read-only image zatím není
-automatizovaná. Trvalé profily a vypnutí swapu řeší síťový playbook. Po uzamčení systému
+RAM OverlayFS a oddělený `/data`. Přípravu oddílů a read-only image řeší [samostatný builder OS image](os-image.md). Trvalé profily a vypnutí swapu řeší síťový playbook. Po uzamčení systému
 služba kontroluje filesystem layout před každým startem:
 
 - `/data` je samostatný zapisovatelný ext4 mount a obsahuje inicializovanou DB.

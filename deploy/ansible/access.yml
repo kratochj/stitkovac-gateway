@@ -1,0 +1,134 @@
+---
+# Offline service operation: use a console or printer-side Ethernet, not the AP
+# whose credential is being changed. Values belong in an encrypted Ansible Vault.
+- name: Rotate appliance service access without replacing gateway identity
+  hosts: gateways
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require explicit maintenance and private replacement credentials
+      ansible.builtin.assert:
+        that:
+          - gateway_access_maintenance | default(false) | bool
+          - gateway_admin_password is defined
+          - gateway_admin_password | length >= 16
+          - gateway_admin_password | length <= 1024
+          - gateway_ap_password is defined
+          - gateway_ap_password is match('^[A-Za-z0-9_-]{16,63}$')
+          - gateway_ssh_public_key is defined
+          - gateway_ssh_public_key is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [A-Za-z0-9_.@ -]+)?$')
+      no_log: true
+
+    - name: Inspect image provisioning marker
+      ansible.builtin.stat:
+        path: /data/gateway-image-ready
+      register: gateway_image_marker
+
+    - name: Require the appliance image access layout
+      ansible.builtin.assert:
+        that: gateway_image_marker.stat.exists
+        fail_msg: This playbook requires the appliance image; custom installations need their own SSH access policy.
+
+    - name: Require stopped agent before rotating access
+      ansible.builtin.command:
+        argv: [systemctl, is-active, stitkovac-gateway]
+      register: gateway_access_active
+      failed_when: false
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse changes during printing
+      ansible.builtin.assert:
+        that: gateway_access_active.stdout | trim != 'active'
+        fail_msg: Finish printing and stop the gateway service from the service console first.
+
+    - name: Require the service AP to be physically inactive before rotation
+      ansible.builtin.command:
+        argv: [nmcli, -t, -f, NAME, connection, show, --active]
+      register: gateway_access_connections
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse replacing a live AP credential
+      ansible.builtin.assert:
+        that: "'gateway-service-ap' not in gateway_access_connections.stdout_lines"
+        fail_msg: Disable the service AP from the local web or console before rotating its credentials.
+
+    - name: Rotate access during explicit maintenance
+      when: not ansible_check_mode
+      block:
+        - name: Stop the network controller and service AP
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: stopped
+          loop: [stitkovac-gateway-network, stitkovac-gateway-ap-dhcp]
+
+        - name: Unlock the system configuration during maintenance
+          ansible.builtin.command:
+            argv: [mount, -o, 'remount,rw', /]
+          changed_when: true
+
+        - name: Stage a private runtime password
+          ansible.builtin.copy:
+            dest: /run/gateway-new-password
+            content: "{{ gateway_admin_password }}"
+            owner: stitkovac-gateway
+            group: stitkovac-gateway
+            mode: '0600'
+          no_log: true
+
+        - name: Replace only the local administrator password hash
+          become_user: stitkovac-gateway
+          ansible.builtin.command:
+            argv: [/usr/lib/stitkovac-gateway/gateway, password, --password-file, /run/gateway-new-password]
+          no_log: true
+          changed_when: true
+
+        - name: Replace the technician public key atomically
+          ansible.builtin.copy:
+            dest: /data/access/authorized_keys
+            content: "{{ gateway_ssh_public_key }}\n"
+            mode: '0644'
+
+        - name: Read the existing service AP configuration
+          ansible.builtin.slurp:
+            src: "{{ item }}"
+          loop: [/data/network/ap-credentials.json, /etc/stitkovac-gateway/network.json]
+          register: gateway_access_config
+          no_log: true
+
+        - name: Replace the AP secret while preserving network and device identity
+          ansible.builtin.copy:
+            dest: "{{ item.path }}"
+            content: "{{ (item.content | b64decode | from_json) | combine(item.change) | to_nice_json }}"
+            mode: '0600'
+          loop:
+            - path: /data/network/ap-credentials.json
+              content: "{{ gateway_access_config.results[0].content }}"
+              change: {password: "{{ gateway_ap_password }}"}
+            - path: /etc/stitkovac-gateway/network.json
+              content: "{{ gateway_access_config.results[1].content }}"
+              change: {apPassword: "{{ gateway_ap_password }}"}
+          no_log: true
+
+        - name: Validate the resulting helper configuration
+          ansible.builtin.command:
+            argv: [/usr/lib/stitkovac-gateway/gateway-network, --check]
+          changed_when: false
+      always:
+        - name: Remove the staged password
+          ansible.builtin.file:
+            path: /run/gateway-new-password
+            state: absent
+          no_log: true
+        - name: Flush persistent configuration
+          ansible.builtin.command: sync
+          changed_when: false
+        - name: Restore read-only root
+          ansible.builtin.command:
+            argv: [mount, -o, 'remount,ro', /]
+          changed_when: true
+
+    - name: Report maintenance completion
+      ansible.builtin.debug:
+        msg: Verify access with the new SSH key before ending the console session. Restart the gateway network controller and agent after verification; no print or reboot was started by this playbook.

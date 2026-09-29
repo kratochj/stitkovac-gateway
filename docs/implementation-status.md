@@ -5,8 +5,8 @@ na `cloud.stitkovac.app`. Agent má lokální administraci, cloudový transport
 a dokončenou softwarovou implementaci aplikačního OTA. Serverová OTA část je
 nasazená v produkci s veřejným klíčem testovací brány. Nejde zatím o dokončenou
 zákaznickou instalaci.
-Gateway změny jsou commitované lokálně na `feat/gateway-foundation`; projekt
-zatím nemá nastavený vzdálený Git repozitář.
+Gateway má vzdálený repozitář `kratochj/stitkovac-gateway`. Správa tiskáren a provozní
+dokončení jsou připravené v pracovních větvích; dosud nejsou nasazené.
 
 ## Hotový základ
 
@@ -38,15 +38,15 @@ je aktualizovaná při zachování nastaveného serveru a tokenu.
 ## Navazující implementační celky
 
 1. **Aktivace OTA v provozu:** server 2.7.13 a pilotní launcher jsou nasazené.
-   Pilotní 0.1.5 je publikované. Zbývá vzdálený gateway repozitář, produkční
+   Pilotní 0.1.5 je publikované. Zbývají produkční
    podpisové klíče, chráněné CI prostředí a provisioning zákaznických zařízení.
-2. **Správa tiskáren:** automatická synchronizace DHCP rezervací a konfigurace,
-   ruční řešení konfliktů rezervací, nejistých úloh a výměny tiskárny.
-   Pojmenování a přiřazení brány/MAC/IP je nyní dostupné ve webu serveru ručně.
-   Přidělená DHCP adresa sama ještě netvoří serverovou registraci tiskárny.
-3. **Provozní dokončení:** retence tiskových dokumentů a historie, servisní změny
-   přístupů, bootstrap celého OS image a panic recovery
-   s původním místem chyby. Běžné transportní chyby už mají bezpečná hlášení.
+2. **Správa tiskáren – implementováno, nenasazeno:** verzovaná DHCP synchronizace,
+   automatická registrace po lease, servis konfliktů, potvrzované řešení UNKNOWN,
+   výměna tiskárny a audit. [Kontrakt a ověření](printer-operations.md).
+3. **Provozní dokončení – implementováno, nenasazeno:** retence dokumentů/historie
+   s trvalými tombstones, změny servisních přístupů, panic recovery s původním
+   stackem a [builder kompletního OS image](os-image.md). Konkrétní obraz a fyzický
+   první boot zůstávají hardwarovým ověřením, nikoli provedeným nasazením.
 4. **Pilot:** produkční end-to-end tisk, samostatný Rollbar projekt/token,
    kompatibilita nainstalovaných klientů, mezirepliková latence, PC42E,
    MAC/IP conflict detection, DHCP interoperabilita,
