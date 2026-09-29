@@ -110,6 +110,9 @@ func (s *Store) Stage(envelope []byte, artifact io.Reader) (Manifest, error) {
 	if _, err := os.Lstat(final); !errors.Is(err, os.ErrNotExist) {
 		return Manifest{}, errors.New("release already exists or cannot be inspected")
 	}
+	if err := checkSpace(s.root, m.Size); err != nil {
+		return Manifest{}, err
+	}
 	temp, err := os.MkdirTemp(s.root, ".staging-")
 	if err != nil {
 		return Manifest{}, err

@@ -32,7 +32,7 @@ import (
 var version = "dev"
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(os.Args[1:]); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("Gateway stopped", "error", err)
 		os.Exit(1)
 	}

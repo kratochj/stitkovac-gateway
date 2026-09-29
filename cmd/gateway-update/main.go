@@ -3,13 +3,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 
 	"github.com/kratochj/stitkovac-gateway/internal/update"
 )
@@ -22,11 +25,12 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: gateway-update stage|initialize|request|status [flags]")
+		return errors.New("usage: gateway-update download|stage|initialize|request|status [flags]")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := flags.String("releases", "/data/gateway-releases", "Persistent release directory")
 	keysPath := flags.String("keys", "/etc/stitkovac-gateway/release-keys.json", "Read-only public trust anchors")
+	repository := flags.String("repository", "", "Provisioned HTTPS release origin")
 	manifest := flags.String("manifest", "", "Signed release envelope")
 	artifact := flags.String("artifact", "", "Signed executable")
 	version := flags.String("version", "", "Explicit release version")
@@ -45,6 +49,14 @@ func run(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "download":
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		m, err := store.Download(ctx, *repository, *version, nil)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(m)
 	case "stage":
 		f, err := os.Open(*manifest)
 		if err != nil {
