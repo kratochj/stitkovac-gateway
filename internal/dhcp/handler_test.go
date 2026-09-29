@@ -25,7 +25,7 @@ func packet(kind byte, extra ...byte) []byte {
 
 func TestDHCPRoundTripIsDurableBeforeReply(t *testing.T) {
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := t.TempDir() + "/state"
 	s, err := state.Initialize(dir, "test-hash")
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestMalformedAndForeignRequests(t *testing.T) {
 }
 
 func TestReleaseDoesNotRecycleAndDeclineQuarantines(t *testing.T) {
-	s, err := state.Initialize(t.TempDir(), "test-hash")
+	s, err := state.Initialize(t.TempDir()+"/state", "test-hash")
 	if err != nil {
 		t.Fatal(err)
 	}

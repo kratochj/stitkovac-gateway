@@ -55,7 +55,7 @@ func (*fakeConn) SetWriteDeadline(time.Time) error { return nil }
 
 func setup(t *testing.T) (*Worker, state.Attempt, *fakeConn) {
 	t.Helper()
-	s, err := state.Initialize(t.TempDir(), "test-hash")
+	s, err := state.Initialize(t.TempDir()+"/state", "test-hash")
 	if err != nil {
 		t.Fatal(err)
 	}

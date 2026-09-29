@@ -27,6 +27,7 @@ type Server struct {
 	mu                      sync.Mutex
 	sessions                map[[32]byte]session
 	nextLogin               time.Time
+	loginBusy               bool
 	passwordHash, gatewayID string
 }
 
@@ -78,14 +79,16 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	if time.Now().Before(s.nextLogin) {
+	if s.loginBusy || time.Now().Before(s.nextLogin) {
 		s.mu.Unlock()
 		w.Header().Set("Retry-After", "2")
 		http.Error(w, "Vyčkejte a zkuste přihlášení znovu.", http.StatusTooManyRequests)
 		return
 	}
 	s.nextLogin = time.Now().Add(2 * time.Second)
+	s.loginBusy = true
 	s.mu.Unlock()
+	defer func() { s.mu.Lock(); s.loginBusy = false; s.mu.Unlock() }()
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Neplatný formulář.", http.StatusBadRequest)
 		return

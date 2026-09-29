@@ -159,10 +159,10 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		events := make(chan string, 32)
+		events := make(chan telemetry.Diagnostic, 32)
 		report := func(code string) {
 			select {
-			case events <- code:
+			case events <- telemetry.Capture(code):
 			default:
 			}
 		}
@@ -170,7 +170,9 @@ func run(args []string) error {
 		if spoolErr != nil {
 			slog.Warn("Diagnostic spool unavailable; printing remains independent")
 		}
-		if spool!=nil {defer spool.Close()}
+		if spool != nil {
+			defer spool.Close()
+		}
 		var cloudClient *cloud.Client
 		if *cloudURL != "" || *tokenFile != "" {
 			if *device == "" || *cloudURL == "" || *tokenFile == "" {

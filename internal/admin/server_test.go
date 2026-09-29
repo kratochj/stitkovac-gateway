@@ -17,7 +17,7 @@ func TestAuthenticationAndOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := state.Initialize(t.TempDir(), hash)
+	store, err := state.Initialize(t.TempDir()+"/state", hash)
 	if err != nil {
 		t.Fatal(err)
 	}

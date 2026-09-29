@@ -40,7 +40,7 @@ func (*printer) SetReadDeadline(time.Time) error  { return nil }
 func (*printer) SetWriteDeadline(time.Time) error { return nil }
 
 func TestWSSDispatchAndDuplicateNotification(t *testing.T) {
-	s, err := state.Initialize(t.TempDir(), "test-hash")
+	s, err := state.Initialize(t.TempDir()+"/state", "test-hash")
 	if err != nil {
 		t.Fatal(err)
 	}

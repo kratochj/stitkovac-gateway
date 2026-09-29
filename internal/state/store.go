@@ -57,6 +57,9 @@ func Initialize(dir, passwordHash string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
+	if err := privateDirectory(dir); err != nil {
+		return nil, err
+	}
 	path, err := filepath.Abs(filepath.Join(dir, "gateway.db"))
 	if err != nil {
 		return nil, err
@@ -95,6 +98,9 @@ func Initialize(dir, passwordHash string) (*Store, error) {
 }
 
 func Open(dir string) (*Store, error) {
+	if err := privateDirectory(dir); err != nil {
+		return nil, err
+	}
 	path, err := filepath.Abs(filepath.Join(dir, "gateway.db"))
 	if err != nil {
 		return nil, err
@@ -130,6 +136,17 @@ func Open(dir string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func privateDirectory(dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+		return errors.New("data directory must be private (0700) and not a symlink")
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }

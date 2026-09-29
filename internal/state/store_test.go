@@ -18,7 +18,7 @@ var ctx = context.Background()
 
 func newStore(t *testing.T) (*Store, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := t.TempDir() + "/state"
 	s, err := Initialize(dir, "test-hash")
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +34,16 @@ func TestMissingStateFailsClosed(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "gateway.db")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("open created state")
+	}
+}
+
+func TestPublicDataDirectoryIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Initialize(dir, "test-hash"); err == nil {
+		t.Fatal("accepted non-private data directory")
 	}
 }
 

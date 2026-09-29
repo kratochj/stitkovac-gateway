@@ -45,6 +45,31 @@ type Spool struct {
 	id, version, boot string
 }
 
+type Diagnostic struct {
+	code      string
+	frames    []Frame
+	timestamp int64
+}
+
+// Capture runs at the reporting site, before asynchronous queue processing.
+func Capture(code string) Diagnostic {
+	d := Diagnostic{code: code, timestamp: time.Now().Unix()}
+	if _, ok := messages[code]; !ok {
+		return Diagnostic{}
+	}
+	pcs := make([]uintptr, 12)
+	n := runtime.Callers(2, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		f, more := frames.Next()
+		d.frames = append(d.frames, Frame{File: filepath.Base(f.File), Function: f.Function, Line: f.Line})
+		if !more {
+			break
+		}
+	}
+	return d
+}
+
 func Open(dir, id, version string) (*Spool, error) {
 	if !safeValue.MatchString(id) || !safeValue.MatchString(version) {
 		return nil, errors.New("invalid diagnostic identity")
@@ -83,21 +108,15 @@ func Open(dir, id, version string) (*Spool, error) {
 func (s *Spool) Close() error { return s.db.Close() }
 
 func (s *Spool) Record(ctx context.Context, code string) error {
-	message, ok := messages[code]
+	return s.record(ctx, Capture(code))
+}
+
+func (s *Spool) record(ctx context.Context, d Diagnostic) error {
+	message, ok := messages[d.code]
 	if !ok {
 		return errors.New("diagnostic code is not allowlisted")
 	}
-	e := Event{EventID: state.ID(), GatewayID: s.id, BootID: s.boot, Code: code, Message: message, Version: s.version, Timestamp: time.Now().Unix()}
-	pcs := make([]uintptr, 12)
-	n := runtime.Callers(2, pcs)
-	frames := runtime.CallersFrames(pcs[:n])
-	for {
-		f, more := frames.Next()
-		e.Frames = append(e.Frames, Frame{File: filepath.Base(f.File), Function: f.Function, Line: f.Line})
-		if !more {
-			break
-		}
-	}
+	e := Event{EventID: state.ID(), GatewayID: s.id, BootID: s.boot, Code: d.code, Message: message, Version: s.version, Timestamp: d.timestamp, Frames: d.frames}
 	b, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -145,7 +164,7 @@ func (s *Spool) Pending(ctx context.Context) ([]Event, error) {
 }
 
 // Run is independent of print transactions; it retries diagnostic delivery only.
-func (s *Spool) Run(ctx context.Context, in <-chan string, send func(context.Context, Event) error) {
+func (s *Spool) Run(ctx context.Context, in <-chan Diagnostic, send func(context.Context, Event) error) {
 	last := map[string]time.Time{}
 	flush := func() {
 		if send == nil {
@@ -174,7 +193,11 @@ func (s *Spool) Run(ctx context.Context, in <-chan string, send func(context.Con
 		select {
 		case <-ctx.Done():
 			return
-		case code := <-in:
+		case diagnostic, open := <-in:
+			if !open {
+				return
+			}
+			code := diagnostic.code
 			if time.Since(last[code]) < time.Minute {
 				continue
 			}
@@ -182,7 +205,7 @@ func (s *Spool) Run(ctx context.Context, in <-chan string, send func(context.Con
 				continue
 			}
 			last[code] = time.Now()
-			_ = s.Record(ctx, code)
+			_ = s.record(ctx, diagnostic)
 		case <-ticker.C:
 			flush()
 		}
