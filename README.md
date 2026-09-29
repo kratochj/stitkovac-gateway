@@ -31,7 +31,8 @@ Chyby se hlásí do Rollbaru přes server Štítkovače.
 - Historie tiskových pokusů, upozornění na nejisté výsledky a lokální TCP diagnostika tiskáren.
 - Odchozí WSS, obnovování spojení, HTTPS claim/download/start/result a RAW TCP tisk.
 - Omezená trvalá fronta očištěných chyb pro serverový Rollbar relay.
-- Podepsaná vydání, trvalý výběr verze, launcher s readiness a automatickým rollbackem.
+- Podepsané OTA přes WSS, dokončení tisku před aktivací, launcher s readiness a rollbackem.
+- Serverový rollout, servisní okna a audit; hosting podepsaných vydání, Ansible a podpisová CI.
 - ARM64 build, systemd služba, Ansible bootstrap/diagnostika a sestavení `.deb` na Linuxu.
 
 ## Vývoj

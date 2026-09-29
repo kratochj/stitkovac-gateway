@@ -1,0 +1,77 @@
+name: Sign and publish gateway release
+on:
+  push:
+    tags: ['v*.*.*']
+permissions:
+  contents: read
+concurrency:
+  group: gateway-release
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Validate stable tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          tag = os.environ['RELEASE_TAG']
+          assert re.fullmatch(r'v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})', tag)
+          PY
+      - name: Verify and build release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: make VERSION="${RELEASE_TAG#v}" check test build arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-gateway
+          path: |
+            bin/gateway-linux-arm64
+            bin/gateway-release
+          retention-days: 7
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Protect this environment and v* tags. Only this job receives release credentials.
+    environment: gateway-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: unsigned-gateway
+          path: bin
+      - name: Sign immutable artifact
+        env:
+          SIGNING_KEY: ${{ secrets.GATEWAY_SIGNING_KEY_PEM }}
+          KEY_ID: ${{ vars.GATEWAY_SIGNING_KEY_ID }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          umask 077
+          key_file=$(mktemp)
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s\n' "$SIGNING_KEY" > "$key_file"
+          unset SIGNING_KEY
+          chmod 700 bin/gateway-release
+          mkdir -p dist/release
+          bin/gateway-release --artifact bin/gateway-linux-arm64 --version "${RELEASE_TAG#v}" \
+            --key-file "$key_file" --key-id "$KEY_ID" --manifest-out dist/release/manifest.json \
+            > dist/release/public-keys.json
+          cp bin/gateway-linux-arm64 dist/release/gateway
+      - name: Publish verified release without activating gateways
+        env:
+          GATEWAY_RELEASE_ORIGIN: ${{ vars.GATEWAY_RELEASE_ORIGIN }}
+          GATEWAY_PUBLISHER_TOKEN: ${{ secrets.GATEWAY_PUBLISHER_TOKEN }}
+        run: python3 scripts/release/publish.py dist/release/manifest.json dist/release/gateway
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-gateway-${{ github.ref_name }}
+          path: dist/release/
+          retention-days: 90

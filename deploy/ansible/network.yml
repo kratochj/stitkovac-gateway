@@ -392,8 +392,9 @@
           Requires=nftables.service stitkovac-gateway-network.service
           After=nftables.service stitkovac-gateway-network.service
           [Service]
+          Environment="GATEWAY_NETWORK_ARGS=--ap-admin-address {{ gateway_ap_address }}:8443"
           ExecStart=
-          ExecStart=/usr/lib/stitkovac-gateway/gateway serve --data-dir /data/gateway $GATEWAY_ARGS --ap-admin-address {{ gateway_ap_address }}:8443
+          ExecStart=/usr/lib/stitkovac-gateway/gateway serve --data-dir /data/gateway $GATEWAY_ARGS $GATEWAY_NETWORK_ARGS
 
     - name: Inspect installed services
       ansible.builtin.service_facts:

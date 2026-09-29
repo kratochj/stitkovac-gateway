@@ -2,7 +2,8 @@
 
 Aktualizováno 2026-09-29. Serverová podpora bran je vydaná a nasazená v **2.7.12**
 na `cloud.stitkovac.app`. Agent má lokální administraci, cloudový transport
-a základ aplikačního OTA. Nejde zatím o dokončenou zákaznickou instalaci.
+a dokončenou softwarovou implementaci aplikačního OTA. Nová serverová OTA část
+je připravená na větvi `feat/gateway-ota` a zatím není v produkci. Nejde zatím o dokončenou zákaznickou instalaci.
 Gateway změny jsou commitované lokálně na `feat/gateway-foundation`; projekt
 zatím nemá nastavený vzdálený Git repozitář.
 
@@ -21,12 +22,12 @@ zatím nemá nastavený vzdálený Git repozitář.
 | Chyby | Oddělená omezená SQLite fronta, allowlist bez raw errors, opakované předání serverovému relay |
 | Server | Registrace, tokeny, session fencing, samostatná tisková fronta, WSS/HTTP API a Rollbar relay |
 | Web serveru | Registrace a správa tokenů, superadmin přehled, přiřazení brány a MAC k tiskárně |
-| OTA základ | Ed25519 manifesty, omezené HTTPS stažení, kontrola místa, neměnná vydání, trvalý trial/rollback, launcher s readiness |
+| OTA | WSS příkazy, podepsaný hosting, superadmin rollout/audit, dokončení aktivního tisku, readiness/rollback, retence, Ansible trust anchors a podpisová CI |
 | Distribuce | ARM64 build všech nástrojů, systemd storage guard, Ansible bootstrap, sestavený a rozbalením ověřený `.deb`, ARM64 procesní test |
 | VirtualBox laboratoř | Debian ARM64 s read-only systémem, simulovaný WSS server, DHCP/TCP tiskárna, ověřený štítek a účtenka, obnova po tvrdém vypnutí VM |
 
 Podrobnosti: [nasazení serveru](server-deployment-2.7.12.md),
-[OTA implementace a zbývající části](ota-implementation.md).
+[OTA implementace a produkční aktivace](ota-implementation.md).
 Testovací build a jeho omezení: [VirtualBox laboratoř](virtualbox-lab.md).
 Agent 0.1.4: [síťová administrace a instalační postup](network-administration.md).
 Předchozí celek: [historie a diagnostika tisku](print-diagnostics.md); současná VM
@@ -34,15 +35,15 @@ je aktualizovaná při zachování nastaveného serveru a tokenu.
 
 ## Navazující implementační celky
 
-1. **Dokončení OTA:** serverové příkazy přes WSS, superadmin rollout a audit,
-   dokončení aktivního tisku před aktualizací, release hosting, klíče a podpisové
-   CI. Výchozí systemd unit zatím není přepnutá na launcher.
+1. **Aktivace OTA v provozu:** vydat a nasadit serverovou větev, založit vzdálený
+   gateway repozitář, nastavit produkční klíče a chráněné CI prostředí, provisionovat
+   launcher na zařízeních. Implementace a lokální integrační testy jsou hotové.
 2. **Správa tiskáren:** automatická synchronizace DHCP rezervací a konfigurace,
    ruční řešení konfliktů rezervací, nejistých úloh a výměny tiskárny.
    Pojmenování a přiřazení brány/MAC/IP je nyní dostupné ve webu serveru ručně.
    Přidělená DHCP adresa sama ještě netvoří serverovou registraci tiskárny.
 3. **Provozní dokončení:** retence tiskových dokumentů a historie, servisní změny
-   přístupů, retence vydání, bootstrap celého OS image a panic recovery
+   přístupů, bootstrap celého OS image a panic recovery
    s původním místem chyby. Běžné transportní chyby už mají bezpečná hlášení.
 4. **Pilot:** produkční end-to-end tisk, samostatný Rollbar projekt/token,
    kompatibilita nainstalovaných klientů, mezirepliková latence, PC42E,

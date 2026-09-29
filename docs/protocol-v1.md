@@ -82,3 +82,23 @@ Kontraktní test `TestSpringBackend` se spouští přes serverové
 `GatewayTransportTests` s `GATEWAY_GO_COMMAND` a `GATEWAY_SOURCE`. Používá skutečný
 Go WSS/HTTPS klient proti Springu s MariaDB, TLS testovací ingress a simulovanou
 tiskárnu. Ověřuje i ztrátu potvrzení a reconnect bez druhého zápisu.
+
+## Aplikační OTA (volitelné rozšíření)
+
+Agent pod provisionovaným launcherem posílá v `hello` `otaProtocol: 1`.
+Starší agent má implicitně 0 a není cílem OTA. `ota.available` probudí samostatný
+controller; WSS worker nesmí synchronně čekat na aktualizaci, protože její drain
+ukončuje právě cloudové spojení.
+
+`GET /api/gateway/v1/ota/command` vrátí `{command: null}` nebo příkaz
+`{commandId, version, fromVersion, kind, expiresAt}`. `kind` je `UPDATE` nebo
+`ROLLBACK`, `expiresAt` jsou Unix sekundy. Příkaz neobsahuje shell ani download URL.
+`POST /ota/{id}/report` přijímá `{sequence, state, actualVersion, reason?}` a vrací
+204; `POST /ota/{id}/activate` s `{sequence}` vrací `{allowed}`. Obě cesty jsou
+relativní k `/api/gateway/v1`. `GET /ota/{id}` vrací `{state}` pro rekonciliaci
+zrušeného nebo expirovaného příkazu. Vše vyžaduje vlastní gateway token,
+aktivační grant a report však přežívají odpojení WSS session při drainu.
+
+Stavy a přesná pravidla aktivačního grantu, podpisů a bootu jsou v
+[OTA implementaci](ota-implementation.md). Konečný úspěch znamená potvrzení
+lokálního health checku nové verze, nikdy pouhé stažení artefaktu.
