@@ -1,0 +1,44 @@
+# Aplikační OTA: implementace
+
+## Hotový základ
+
+`internal/update` ověřuje Ed25519 podpis přes přesné bajty manifestu oddělené
+podpisovou doménou. Manifest váže stabilní číselnou verzi, platformu, velikost,
+SHA-256 a protokol launcheru. Maximální manifest má 16 KiB, binární artefakt
+128 MiB. Agent obsahuje lokální web, proto tvoří jeden aktualizační artefakt.
+Důvěryhodné veřejné klíče se předávají z připraveného OS; privátní klíč nepatří
+na bránu ani do serveru. Distribuce a správa skutečných klíčů zbývá k nasazení.
+
+Úložiště vydání musí být předem vytvořené jako soukromý adresář na `/data`.
+Instalace probíhá do dočasného adresáře. Po ověření délky a checksumu a po fsync
+souborů/adresářů se celý adresář atomicky zveřejní pod verzí. Existující vydání
+se nepřepisuje. Nedokončené adresáře nemohou být vybrány ke spuštění.
+
+Samostatný atomický `selection.json` obsahuje aktivní, předchozí a požadovanou
+verzi a příznak zkušebního startu. Požadavek nemění běžící proces. Před startem
+kandidáta se trvale označí trial. Příští start bez potvrzení vrací předchozí
+verzi a zaznamená neúspěšnou verzi. Poškozený kandidát se odmítne a původní verze
+zůstane aktivní. Poškozený výběrový manifest vyžaduje servisní opravu, nevytváří
+se automaticky nová identita nebo tisková databáze.
+
+Rollback pracuje pouze s aplikační verzí. Tisková databáze, DHCP rezervace
+ani diagnostika se nezálohují a neobnovují v rámci OTA. Každé spuštění znovu
+ověřuje podpis i checksum binárky. Downgrade běžným požadavkem je zakázaný.
+
+## Ověření
+
+Automatické testy pokrývají neplatné podpisy, klíče, platformu, protokol,
+checksum, zkrácené i prodloužené soubory, symlinky, pokusy o přepsání vydání,
+poškozený výběrový manifest, nedokončenou instalaci, potvrzení i obnovu
+nepotvrzeného startu. Jde o softwarové testy; odolnost ext4/SD při odebrání
+napájení musí potvrdit pilot na konkrétním hardware.
+
+## Navazující části
+
+- Stabilní launcher, readiness handshake a návrat po neúspěšném startu procesu.
+- Omezené HTTPS stahování z důvěryhodného zdroje a podepisovací release pipeline.
+- Serverové OTA příkazy přes WSS, audit, stavové hlášení a superadmin rollout.
+- Dokončení rozpracovaného tisku před aktivací, retence vydání a kontrola místa.
+- Provisioning klíčů, launcheru a celého read-only image; hardwarové power-cut testy.
+
+Dokud nejsou tyto části propojené a ověřené, OTA není zákaznická funkce.
