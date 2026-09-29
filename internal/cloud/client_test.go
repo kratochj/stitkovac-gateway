@@ -136,3 +136,27 @@ func TestRejectInsecureOrigins(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthenticationFailureIsVisibleWithoutExposingSecrets(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "private upstream details", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	client, err := New(server.URL, strings.Repeat("secret", 8), "gateway", "test", nil, server.Client().Transport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	rejected := false
+	client.OnState = func(status string) {
+		if status == "unauthorized" {
+			rejected = true
+			cancel()
+		}
+	}
+	client.Run(ctx)
+	if !rejected {
+		t.Fatal("authentication rejection was not reported")
+	}
+}

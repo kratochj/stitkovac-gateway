@@ -22,6 +22,9 @@ import (
 	"github.com/kratochj/stitkovac-gateway/internal/telemetry"
 )
 
+var errUnauthorized = errors.New("cloud authentication rejected")
+var errHandshake = errors.New("cloud handshake rejected")
+
 var safeID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 type Client struct {
@@ -29,6 +32,7 @@ type Client struct {
 	http                     *http.Client
 	worker                   *printing.Worker
 	report                   func(string)
+	OnState                  func(string)
 }
 type envelope struct {
 	Version      int    `json:"version"`
@@ -48,16 +52,12 @@ type sessionCloud struct {
 }
 
 func New(base, token, id, version string, worker *printing.Worker, transport http.RoundTripper, report func(string)) (*Client, error) {
-	u, err := url.Parse(base)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" {
-		return nil, errors.New("cloud URL must be an HTTPS origin")
+	cfg, err := NormalizeConfig(base, token)
+	if err != nil {
+		return nil, err
 	}
-	if len(token) < 32 || len(token) > 4096 {
-		return nil, errors.New("invalid gateway token")
-	}
-	u.Path = ""
 	h := &http.Client{Transport: transport, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("cloud redirects are forbidden") }}
-	return &Client{base: u.String(), token: token, id: id, version: version, http: h, worker: worker, report: report}, nil
+	return &Client{base: cfg.URL, token: cfg.Token, id: id, version: version, http: h, worker: worker, report: report}, nil
 }
 
 func (c *Client) request(ctx context.Context, method, path, session string, body any, out any) error {
@@ -197,9 +197,12 @@ func (c *Client) Session(parent context.Context) error {
 	wsHTTP := *c.http
 	wsHTTP.Timeout = 0
 	dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
-	conn, _, err := websocket.Dial(dialCtx, c.base+"/api/gateway/v1/connect", &websocket.DialOptions{HTTPClient: &wsHTTP, HTTPHeader: http.Header{"Authorization": []string{"Bearer " + c.token}, "User-Agent": []string{"Stitkovac-Gateway/" + c.version}}})
+	conn, response, err := websocket.Dial(dialCtx, c.base+"/api/gateway/v1/connect", &websocket.DialOptions{HTTPClient: &wsHTTP, HTTPHeader: http.Header{"Authorization": []string{"Bearer " + c.token}, "User-Agent": []string{"Stitkovac-Gateway/" + c.version}}})
 	dialCancel()
 	if err != nil {
+		if response != nil && (response.StatusCode == 401 || response.StatusCode == 403) {
+			return errUnauthorized
+		}
 		return errors.New("cloud websocket unavailable")
 	}
 	defer conn.CloseNow()
@@ -212,11 +215,14 @@ func (c *Client) Session(parent context.Context) error {
 	kind, b, err := conn.Read(handshake)
 	done()
 	if err != nil {
-		return err
+		return errHandshake
 	}
 	var ready envelope
 	if kind != websocket.MessageText || json.Unmarshal(b, &ready) != nil || ready.Version != 1 || ready.Type != "ready" || !safeID.MatchString(ready.SessionID) {
-		return errors.New("invalid gateway handshake")
+		return errHandshake
+	}
+	if c.OnState != nil {
+		c.OnState("connected")
 	}
 	wake := make(chan struct{}, 1)
 	wake <- struct{}{}
@@ -293,9 +299,22 @@ func (c *Client) Run(ctx context.Context) {
 	failures := 0
 	for ctx.Err() == nil {
 		start := time.Now()
-		_ = c.Session(ctx)
+		if c.OnState != nil {
+			c.OnState("connecting")
+		}
+		err := c.Session(ctx)
 		if ctx.Err() != nil {
 			return
+		}
+		if c.OnState != nil {
+			state := "failed"
+			if errors.Is(err, errUnauthorized) {
+				state = "unauthorized"
+			}
+			if errors.Is(err, errHandshake) {
+				state = "handshake_failed"
+			}
+			c.OnState(state)
 		}
 		failures++
 		if failures >= 5 && c.report != nil {
