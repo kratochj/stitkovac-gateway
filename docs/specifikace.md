@@ -2,6 +2,9 @@
 
 Datum: 2026-09-29. Stav: návrh pro implementaci, nikoli popis hotové funkce.
 
+První implementace a její omezení jsou v [přehledu stavu](implementation-status.md).
+Rozhodnutí o náhradě původně navrženého dnsmasq popisuje [ADR 001](adr-001-dhcp.md).
+
 ## 1. Účel a rozsah
 
 U zákazníka síť izoluje jednotlivá zařízení. Tablet ani cloudový server proto
@@ -178,10 +181,11 @@ získat adresu automaticky; přístup k lokálnímu webu funguje přes IP brány
 
 Postup přidělení a rezervace:
 
-1. Nové zařízení dostane volnou adresu přes DHCP.
-2. Událost o přidělené lease vyvolá idempotentní zápis normalizované MAC, stejné
-   IP, subnetu, prvního přidělení a posledního kontaktu do trvalé lokální evidence.
-3. Tato adresa se automaticky rezervuje pouze pro danou MAC. Při obnově lease,
+1. DHCP služba vybere novému zařízení volnou adresu a trvale uloží rezervaci
+   normalizované MAC/IP ještě před odesláním OFFER.
+2. Před ACK se trvale uloží také aktivní lease. Selhání commitu znamená, že
+   úspěšná odpověď klientovi neodejde. Rezervace tedy vzniká už při nabídce.
+3. Tato adresa zůstává rezervovaná pouze pro danou MAC. Při obnově lease,
    restartu nebo dlouhém odpojení dostane zařízení stejnou adresu.
 4. Změna hostname či DHCP client identifier nesmí pro stejnou MAC vytvořit novou
    adresu. U MAC rezervací se ignoruje DHCP client identifier.
@@ -193,26 +197,16 @@ v ethernetovém poolu, včetně servisního notebooku. Přidělení adresy není
 k tisku: technik nalezené zařízení označí jako tiskárnu a přiřadí mu endpoint.
 Klienti dočasného servisního AP tuto automatickou trvalou rezervaci nedostávají.
 
-Technologický návrh je samostatná instance `dnsmasq` pro ethernet, s trvalým
-lease souborem a omezeným lease hookem. Dnsmasq poskytuje události `add`/`old`/`del`
-přes `dhcp-script`; rezervace lze načítat přes `dhcp-hostsfile` a po změně obnovit
-pomocí SIGHUP. Pro identifikaci rezervace jen podle MAC slouží `id:*`.
-[Dokumentace dnsmasq](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html).
+Původně zvažovaný dnsmasq s asynchronním lease hookem nahrazuje integrovaná
+DHCPv4 služba, která přímo používá trvalou evidenci agenta. SQLite transakce
+zaručuje pořadí commit před odpovědí; lease a rezervace nejsou dvě oddělené kopie
+stavu. Podrobnosti a podporované DHCP zprávy uvádí [ADR 001](adr-001-dhcp.md).
 
 Správce rezervací zapisuje změny sériově, s unikátností MAC i IP v daném subnetu.
-Konfiguraci generuje z trvalé evidence a atomicky nahrazuje. Události `old` po
-reloadu nesmějí vyvolávat nekonečné přepisování a další reloady. Před obsluhou
-nových klientů po restartu se evidence sloučí s uloženými leases a obnoví rezervace.
-Lease hook není transakce s DHCP ACK: implementace musí ošetřit pád mezi prvním
-přidělením a uložením rezervace pomocí trvalé evidence leases a ověřené obnovy.
-Při nečitelném nebo rozporném stavu se nové adresy nepřidělují; web ukáže chybu.
-
-Pouhé asynchronní spuštění hooku po DHCP ACK nesplňuje požadavek odolnosti při
-prvním přidělení. Pilot musí ověřit persistenci MAC/IP před ACK v konkrétní DHCP
-cestě. Pokud ji standardní dnsmasq nezaručí, je nutné doplnit synchronní trvalé
-uložení před ACK nebo zvolit DHCP backend s touto vlastností; nelze to nahradit
-periodickým kopírováním lease souboru. Nesmí se slibovat zachování nepotvrzeného
-zápisu jen proto, že lease existovala v paměti. Jde o podmínku vydání, ne odložený detail.
+Služba začne odpovídat teprve po otevření a ověření databáze. Při nečitelném
+nebo rozporném stavu se nové adresy nepřidělují. Software neposílá ACK před
+commitem; skutečnou trvalost commitu na konkrétní SD kartě stále musí ověřit
+fyzické power-cut testy. Tuto podmínku nelze nahradit unit testem nebo shutdown hookem.
 
 Připojená tiskárna se zpřístupní pro tisk až po úspěšném uložení a aktivaci
 rezervace. Při zaplnění poolu se staré rezervace automaticky nerecyklují.
@@ -541,7 +535,7 @@ OS image včetně případné výchozí konfigurace přes Netplan.
 |---|---|
 | Ansible | Balíčky, účty, služby, firewall, policy, verze agenta, výchozí limity |
 | NetworkManager / lokální web | Wi-Fi profily, ethernetové adresy, servisní AP |
-| Správce rezervací / dnsmasq | Trvalé MAC/IP rezervace, generovaná DHCP konfigurace a aktuální leases |
+| Integrovaná DHCP služba / agent | Trvalé MAC/IP rezervace a aktuální leases ve společné SQLite evidenci |
 | Agent | Identita, token, lokální endpointy, stav synchronizace a tiskových pokusů |
 | Server | Organizace, logické tiskárny, oprávnění, úlohy, přiřazení a cílová verze |
 
@@ -549,9 +543,9 @@ Opakované spuštění Ansible nesmí přepsat zákazníkovu Wi-Fi, znovu vygene
 identitu, vymazat frontu či DHCP rezervace ani změnit servisní heslo. Bootstrap hodnoty jsou jen
 pro chybějící konfiguraci. Výslovný reprovision/reset má samostatný postup.
 
-Role `network` nainstaluje ethernetový dnsmasq, lease hook, trvalé úložiště,
-oprávnění a pořadí startu služby po obnově rezervací. Dynamicky generované
-rezervace nejsou součástí Ansible šablony ani obecného image. Záloha konkrétní
+Role `network` připraví ethernetové rozhraní, oprávnění a pořadí startu
+integrované DHCP služby po obnově rezervací. Nesmí na něm spustit druhý DHCP
+server. Dynamické rezervace nejsou součástí Ansible šablony ani obecného image. Záloha konkrétní
 brány zahrnuje rezervace i leases; obnova se nesmí současně spustit na druhém
 zařízení ve stejné síti.
 
@@ -681,7 +675,7 @@ tisku od kliknutí v aplikaci; fronta a mechanika tiskárny se neskrývají do l
 | Restart brány i tiskárny, expirace nebo RELEASE | Stejná MAC znovu dostane stejnou IP |
 | Změna hostname nebo client identifier | Původní MAC/IP rezervace se nezmění |
 | Pád mezi lease a zápisem rezervace | Obnova z trvalé evidence bez přidělení adresy jiné MAC |
-| Souběžné DHCP události a opakovaný reload | Žádné duplicitní rezervace ani reload smyčka |
+| Souběžné a opakované DHCP požadavky | Žádné duplicitní rezervace ani změna přidělené adresy |
 | Plný DHCP pool | Viditelná chyba, žádné automatické uvolnění starých rezervací |
 | Servisní notebook na ethernetu / AP | Ethernetová rezervace vznikne; AP lease se trvale nerezervuje |
 | Výměna tiskárny nebo cizí MAC na její IP | Staré úlohy se automaticky nepřesměrují |
@@ -707,7 +701,7 @@ tisku od kliknutí v aplikaci; fronta a mechanika tiskárny se neskrývají do l
 | Papír chybí, TCP funguje | UI nehlásí ověřený fyzický tisk jen podle socketu |
 | Opakované odpojení společného napájení | Automatický boot, stejné nastavení a DHCP rezervace, žádný slepý opakovaný tisk |
 | Odpojení při ukládání Wi-Fi / tokenu / rezervace | Poslední úplný stav nebo bezpečná obnova; nikdy poškozená aktivní konfigurace |
-| Vypnutí mezi DHCP ACK a hookem | První přidělená MAC/IP je dohledatelná z trvalého stavu; jinak blokuje vydání |
+| Vypnutí bezprostředně po DHCP ACK | První přidělená MAC/IP je dohledatelná z trvalého stavu; jinak blokuje vydání |
 | Vypnutí při SQLite commitu a checkpointu | Recovery s WAL, zachování dokončených commitů podle vlastností ověřeného úložiště |
 | Odpojení při aktivaci aplikační aktualizace | Spustí se úplná stará nebo nová verze, ne směs souborů |
 | Chybějící nebo poškozený datový oddíl | Žádná nová identita, prázdná pracovní DB ani nezdokumentovaný tisk |

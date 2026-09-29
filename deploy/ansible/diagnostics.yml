@@ -1,0 +1,22 @@
+---
+- name: Inspect a gateway without changing its state
+  hosts: gateways
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Verify storage guards
+      ansible.builtin.command:
+        argv: [/usr/lib/stitkovac-gateway/check-storage]
+      changed_when: false
+      check_mode: false
+
+    - name: Inspect service health
+      ansible.builtin.command:
+        argv: [systemctl, show, stitkovac-gateway, --property=ActiveState, --property=SubState, --property=NRestarts]
+      changed_when: false
+      check_mode: false
+      register: gateway_service
+
+    - name: Show service state
+      ansible.builtin.debug:
+        var: gateway_service.stdout_lines

@@ -1,0 +1,13 @@
+all:
+  children:
+    gateways:
+      hosts:
+        gateway_lab:
+          ansible_host: 192.168.77.1
+          ansible_user: technician
+          gateway_printer_interface: eth0
+          gateway_printer_address: 192.168.77.1
+          gateway_prefix_length: 24
+          gateway_pool_first: 192.168.77.50
+          gateway_pool_last: 192.168.77.199
+          # Supply gateway_admin_password through Ansible Vault, never this file.

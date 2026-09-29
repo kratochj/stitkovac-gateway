@@ -1,0 +1,165 @@
+---
+- name: Install the gateway on a prepared Raspberry Pi OS Lite image
+  hosts: gateways
+  become: true
+  gather_facts: true
+  vars:
+    gateway_binary: "{{ playbook_dir }}/../../bin/gateway-linux-arm64"
+    gateway_printer_interface: eth0
+    gateway_printer_address: 192.168.77.1
+    gateway_prefix_length: 24
+    gateway_pool_first: 192.168.77.50
+    gateway_pool_last: 192.168.77.199
+  tasks:
+    - name: Inspect whether the gateway is already active
+      ansible.builtin.command:
+        argv: [systemctl, is-active, stitkovac-gateway]
+      register: gateway_active
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Refuse provisioning during active operation
+      ansible.builtin.assert:
+        that: gateway_active.stdout | trim != 'active'
+        fail_msg: Stop printing and shut down the gateway service before provisioning.
+
+    - name: Validate target and network variables
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.system == 'Linux'
+          - ansible_facts.architecture == 'aarch64'
+          - gateway_printer_interface is match('^[a-zA-Z0-9_-]{1,15}$')
+          - gateway_printer_address is match('^[0-9.]+$')
+          - gateway_pool_first is match('^[0-9.]+$')
+          - gateway_pool_last is match('^[0-9.]+$')
+          - gateway_prefix_length | int >= 16
+          - gateway_prefix_length | int <= 29
+        fail_msg: This playbook requires the prepared ARM64 lab image and valid printer network variables.
+
+    - name: Inspect the persistent mount
+      ansible.builtin.command:
+        argv: [findmnt, --noheadings, --mountpoint, /data, --output, FSTYPE]
+      register: gateway_data_mount
+      changed_when: false
+      check_mode: false
+
+    - name: Require existing persistent storage
+      ansible.builtin.assert:
+        that: gateway_data_mount.stdout | trim == 'ext4'
+        fail_msg: Prepare a separate ext4 /data partition first; this playbook never repartitions a disk.
+
+    - name: Create the service account
+      ansible.builtin.user:
+        name: stitkovac-gateway
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+
+    - name: Create persistent private state directory
+      ansible.builtin.file:
+        path: /data/gateway
+        state: directory
+        owner: stitkovac-gateway
+        group: stitkovac-gateway
+        mode: '0700'
+
+    - name: Create application and configuration directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /usr/lib/stitkovac-gateway
+        - /etc/stitkovac-gateway
+
+    - name: Install the ARM64 executable
+      ansible.builtin.copy:
+        src: "{{ gateway_binary }}"
+        dest: /usr/lib/stitkovac-gateway/gateway
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install the storage guard
+      ansible.builtin.copy:
+        src: ../systemd/check-storage
+        dest: /usr/lib/stitkovac-gateway/check-storage
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Inspect initialized state
+      ansible.builtin.stat:
+        path: /data/gateway/gateway.db
+      register: gateway_database
+
+    - name: Initialize a new identity without replacing existing state
+      when: not gateway_database.stat.exists and not ansible_check_mode
+      block:
+        - name: Require a private provisioning password
+          ansible.builtin.assert:
+            that:
+              - gateway_admin_password is defined
+              - gateway_admin_password | length >= 16
+          no_log: true
+
+        - name: Stage the password in runtime memory
+          ansible.builtin.copy:
+            content: "{{ gateway_admin_password }}"
+            dest: /run/stitkovac-gateway-init-password
+            owner: stitkovac-gateway
+            group: stitkovac-gateway
+            mode: '0600'
+          no_log: true
+
+        - name: Initialize gateway credentials and journal
+          become_user: stitkovac-gateway
+          ansible.builtin.command:
+            argv:
+              - /usr/lib/stitkovac-gateway/gateway
+              - init
+              - --password-file
+              - /run/stitkovac-gateway-init-password
+              - --admin-address
+              - "{{ gateway_printer_address }}:8443"
+              - --printer-address
+              - "{{ gateway_printer_address }}/{{ gateway_prefix_length }}"
+              - --pool-first
+              - "{{ gateway_pool_first }}"
+              - --pool-last
+              - "{{ gateway_pool_last }}"
+            creates: /data/gateway/gateway.db
+          no_log: true
+      always:
+        - name: Remove the temporary provisioning password
+          ansible.builtin.file:
+            path: /run/stitkovac-gateway-init-password
+            state: absent
+          no_log: true
+
+    - name: Install initial runtime arguments without overwriting field configuration
+      ansible.builtin.copy:
+        content: |
+          GATEWAY_ARGS="--admin-address {{ gateway_printer_address }}:8443 --dhcp-interface {{ gateway_printer_interface }} --printer-address {{ gateway_printer_address }}/{{ gateway_prefix_length }} --pool-first {{ gateway_pool_first }} --pool-last {{ gateway_pool_last }}"
+        dest: /etc/stitkovac-gateway/gateway.env
+        force: false
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Install the systemd service without activating unvalidated networking
+      ansible.builtin.copy:
+        src: ../systemd/stitkovac-gateway.service
+        dest: /etc/systemd/system/stitkovac-gateway.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload systemd
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true

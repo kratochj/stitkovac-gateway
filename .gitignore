@@ -9,3 +9,5 @@
 *.key
 *.pem
 *.deb
+__pycache__/
+*.pyc

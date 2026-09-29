@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Fail closed unless the persistent and read-only filesystem layout is present."""
+import json
+import os
+import subprocess
+import sys
+
+
+# Inspect superblock flags: systemd sandbox mount flags can mask a writable OS.
+def mount(path):
+    result = subprocess.run(
+        ["findmnt", "--json", "--target", path, "--output", "TARGET,FSTYPE,FS-OPTIONS"],
+        check=True, capture_output=True, text=True,
+    )
+    return json.loads(result.stdout)["filesystems"][0]
+
+
+def check():
+    data = mount("/data")
+    assert data["target"] == "/data" and data["fstype"] == "ext4", "missing ext4 data mount"
+    assert "rw" in data["fs-options"].split(","), "data mount is not writable"
+    assert os.path.isfile("/data/gateway/gateway.db"), "gateway has not been initialized"
+    root = mount("/")
+    options = root["fs-options"].split(",")
+    if root["fstype"] == "overlay":
+        values = dict(option.split("=", 1) for option in options if "=" in option)
+        assert mount(values["upperdir"])["fstype"] in ("tmpfs", "ramfs"), "overlay upper must be volatile"
+        for lower in values["lowerdir"].split(":"):
+            assert "ro" in mount(lower)["fs-options"].split(","), "overlay lower is writable"
+    else:
+        assert "ro" in options, "root filesystem is writable"
+    boot = "/boot/firmware" if os.path.isdir("/boot/firmware") else "/boot"
+    assert "ro" in mount(boot)["fs-options"].split(","), "boot filesystem is writable"
+
+
+if __name__ == "__main__":
+    try:
+        check()
+    except (AssertionError, KeyError, ValueError, OSError, subprocess.SubprocessError) as error:
+        print(f"Gateway storage preflight failed: {error}", file=sys.stderr)
+        sys.exit(1)
