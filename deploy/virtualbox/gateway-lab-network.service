@@ -1,0 +1,13 @@
+[Unit]
+Description=Isolated gateway lab printer network
+Before=stitkovac-gateway.service gateway-lab-printer.service gateway-lab-dhcp.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/stitkovac-gateway/lab-network
+RemainAfterExit=yes
+RuntimeDirectory=gateway-lab
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

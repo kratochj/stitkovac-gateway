@@ -21,9 +21,11 @@ zatím nemá nastavený vzdálený Git repozitář.
 | Web serveru | Registrace a správa tokenů, superadmin přehled, přiřazení brány a MAC k tiskárně |
 | OTA základ | Ed25519 manifesty, omezené HTTPS stažení, kontrola místa, neměnná vydání, trvalý trial/rollback, launcher s readiness |
 | Distribuce | ARM64 build všech nástrojů, systemd storage guard, Ansible bootstrap, sestavený a rozbalením ověřený `.deb`, ARM64 procesní test |
+| VirtualBox laboratoř | Debian ARM64 s read-only systémem, simulovaný WSS server, DHCP/TCP tiskárna, ověřený štítek a účtenka, obnova po tvrdém vypnutí VM |
 
 Podrobnosti: [nasazení serveru](server-deployment-2.7.12.md),
 [OTA implementace a zbývající části](ota-implementation.md).
+Testovací build a jeho omezení: [VirtualBox laboratoř](virtualbox-lab.md).
 
 ## Navazující implementační celky
 

@@ -1,0 +1,12 @@
+all:
+  children:
+    gateways:
+      hosts:
+        gateway_virtualbox:
+          ansible_host: 127.0.0.1
+          ansible_port: 2222
+          ansible_user: technik
+          ansible_python_interpreter: /usr/bin/python3
+          ansible_private_key_file: "{{ inventory_dir }}/../../dist/virtualbox/id_ed25519"
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=yes -o UserKnownHostsFile={{ inventory_dir }}/../../dist/virtualbox/known_hosts"
+          gateway_printer_interface: vgw0

@@ -54,6 +54,7 @@ Linux; lokální příkaz bez dalších parametrů nespouští DHCP ani cloudov�
 
 Další informace:
 
+- [Testovací VirtualBox build se simulovanou tiskárnou](docs/virtualbox-lab.md).
 - [Stav implementace a zbývající práce](docs/implementation-status.md).
 - [Stav aplikačního OTA a launcheru](docs/ota-implementation.md).
 - [Instalace a bezpečný pilot](docs/installation.md).

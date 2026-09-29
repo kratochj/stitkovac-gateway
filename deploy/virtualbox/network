@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+if ! ip netns list | grep -q '^gateway-printer'; then
+    ip netns add gateway-printer
+fi
+if ! ip link show vgw0 >/dev/null 2>&1; then
+    ip link add vgw0 type veth peer name vprinter0
+    ip link set vprinter0 netns gateway-printer
+    ip -n gateway-printer link set vprinter0 name eth0
+fi
+ip address replace 192.168.77.1/24 dev vgw0
+ip link set vgw0 up
+ip -n gateway-printer link set lo up
+ip -n gateway-printer link set eth0 address 02:77:00:00:00:01
+ip -n gateway-printer link set eth0 up

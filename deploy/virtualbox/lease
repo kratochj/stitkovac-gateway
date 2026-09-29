@@ -1,0 +1,22 @@
+#!/usr/bin/python3
+"""BusyBox DHCP hook for the isolated simulated printer; never configure a route."""
+import ipaddress
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+lease = Path('/run/gateway-lab/lease.json')
+if sys.argv[1] in ('bound', 'renew'):
+    address = ipaddress.IPv4Address(os.environ['ip'])
+    assert address in ipaddress.IPv4Network('192.168.77.0/24')
+    assert os.environ['interface'] == 'eth0'
+    subprocess.run(['ip', 'address', 'replace', f'{address}/24', 'dev', 'eth0'], check=True)
+    pending = lease.with_suffix('.pending')
+    pending.write_text(json.dumps({'ip': str(address), 'mac': '02:77:00:00:00:01'}))
+    pending.chmod(0o644)
+    pending.replace(lease)
+elif sys.argv[1] == 'deconfig':
+    subprocess.run(['ip', '-4', 'address', 'flush', 'dev', 'eth0'], check=True)
+    lease.unlink(missing_ok=True)

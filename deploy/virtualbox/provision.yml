@@ -1,0 +1,158 @@
+---
+- name: Prepare only the isolated VirtualBox lab
+  hosts: gateways
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require the explicit lab hostname and architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.hostname == 'stitkovac-gateway-lab'
+          - ansible_facts.architecture == 'aarch64'
+    - name: Require completed cloud initialization
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+    - name: Ensure lab DHCP client is available
+      ansible.builtin.apt:
+        name: busybox
+        state: present
+    - name: Initialize the new lab data disk without overwriting existing storage
+      ansible.builtin.script: prepare-storage.py
+      args:
+        executable: /usr/bin/python3
+
+- import_playbook: ../ansible/bootstrap.yml
+
+- name: Configure simulation and a read-only lab system
+  hosts: gateways
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Create persistent lab directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: stitkovac-gateway
+        group: stitkovac-gateway
+        mode: '0700'
+      loop: [/data/lab, /data/lab/prints]
+    - name: Install private lab credentials
+      ansible.builtin.copy:
+        content: "{{ item.value }}"
+        dest: "/data/lab/{{ item.name }}"
+        owner: stitkovac-gateway
+        group: stitkovac-gateway
+        mode: '0600'
+      loop:
+        - { name: password, value: "{{ gateway_admin_password }}" }
+        - { name: token, value: "{{ gateway_lab_token }}" }
+      no_log: true
+    - name: Install test-only executable and network helpers
+      ansible.builtin.copy:
+        src: "{{ item.source }}"
+        dest: "/usr/lib/stitkovac-gateway/{{ item.name }}"
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - { source: ../../bin/gateway-lab-linux-arm64, name: gateway-lab }
+        - { source: network, name: lab-network }
+        - { source: lease, name: lab-lease }
+    - name: Install isolated lab services
+      ansible.builtin.copy:
+        src: "{{ item }}.service"
+        dest: "/etc/systemd/system/{{ item }}.service"
+        mode: '0644'
+      loop: [gateway-lab-network, gateway-lab-cloud, gateway-lab-dhcp, gateway-lab-printer]
+    - name: Create gateway service override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/stitkovac-gateway.service.d
+        state: directory
+        mode: '0755'
+    - name: Bind the agent to isolated lab services
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/stitkovac-gateway.service.d/lab.conf
+        mode: '0644'
+        content: |
+          [Unit]
+          After=gateway-lab-network.service gateway-lab-cloud.service
+          Requires=gateway-lab-network.service gateway-lab-cloud.service
+          [Service]
+          Environment=SSL_CERT_FILE=/data/lab/tls.crt
+    - name: Configure local-only administration and simulated cloud
+      ansible.builtin.copy:
+        dest: /etc/stitkovac-gateway/gateway.env
+        mode: '0644'
+        content: |
+          GATEWAY_ARGS="--admin-address 127.0.0.1:8443 --dhcp-interface vgw0 --cloud-url https://127.0.0.1:9443 --cloud-token-file /data/lab/token"
+    - name: Persist the uplink profile independently of cloud-init
+      ansible.builtin.copy:
+        dest: /etc/systemd/network/00-lab-uplink.network
+        mode: '0644'
+        content: |
+          [Match]
+          Name=enp*
+          [Network]
+          DHCP=ipv4
+          DNS=1.1.1.1
+          IPv6AcceptRA=no
+          LinkLocalAddressing=no
+          [DHCPv4]
+          UseDNS=no
+    - name: Disable cloud initialization on subsequent read-only boots
+      ansible.builtin.copy:
+        dest: /etc/cloud/cloud-init.disabled
+        content: ''
+        mode: '0644'
+    - name: Store system logs in RAM
+      ansible.builtin.copy:
+        dest: /etc/systemd/journald.conf
+        mode: '0644'
+        content: |
+          [Journal]
+          Storage=volatile
+          RuntimeMaxUse=32M
+    - name: Read filesystem UUIDs
+      ansible.builtin.command:
+        argv: [findmnt, --noheadings, --output, UUID, --mountpoint, "{{ item }}"]
+      loop: ['/', /boot/efi]
+      register: lab_filesystems
+      changed_when: false
+    - name: Set persistent data and read-only system mounts
+      ansible.builtin.copy:
+        dest: /etc/fstab
+        mode: '0644'
+        content: |
+          UUID={{ lab_filesystems.results[0].stdout | trim }} / ext4 ro,noatime,errors=remount-ro 0 1
+          UUID={{ lab_filesystems.results[1].stdout | trim }} /boot/efi vfat ro,umask=077 0 2
+          LABEL=GWLABDATA /data ext4 defaults,noatime 0 2
+          tmpfs /tmp tmpfs defaults,nosuid,nodev,mode=1777,size=128M 0 0
+          tmpfs /var/tmp tmpfs defaults,nosuid,nodev,mode=1777,size=64M 0 0
+          tmpfs /var/log tmpfs defaults,nosuid,nodev,mode=0755,size=32M 0 0
+    - name: Disable maintenance timers on the immutable lab image
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+      loop: [apt-daily.timer, apt-daily-upgrade.timer, apt-listchanges.timer]
+    - name: Mask maintenance writers that require a writable system disk
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        masked: true
+        state: stopped
+      loop: [apt-listchanges.service, grub-common.service, systemd-networkd-persistent-storage.service]
+    - name: Enable lab services for the next boot
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        daemon_reload: true
+      loop: [gateway-lab-network, gateway-lab-cloud, gateway-lab-dhcp, gateway-lab-printer, stitkovac-gateway]
+    - name: Prepare the local test TLS certificate before the first agent start
+      ansible.builtin.systemd_service:
+        name: gateway-lab-cloud
+        state: started
+    - name: Wait for the local test server
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 9443
+        timeout: 20

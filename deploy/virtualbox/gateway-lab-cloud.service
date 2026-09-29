@@ -1,0 +1,21 @@
+[Unit]
+Description=Offline gateway lab cloud and test console
+After=local-fs.target
+RequiresMountsFor=/data
+
+[Service]
+User=stitkovac-gateway
+Group=stitkovac-gateway
+ExecStart=/usr/lib/stitkovac-gateway/gateway-lab --mode cloud
+Restart=on-failure
+RestartSec=2
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/data/lab
+MemoryMax=192M
+
+[Install]
+WantedBy=multi-user.target

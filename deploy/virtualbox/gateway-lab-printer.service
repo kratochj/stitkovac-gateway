@@ -1,0 +1,23 @@
+[Unit]
+Description=Simulated PDF printer on the isolated gateway network
+After=gateway-lab-network.service
+Requires=gateway-lab-network.service
+RequiresMountsFor=/data
+
+[Service]
+User=stitkovac-gateway
+Group=stitkovac-gateway
+NetworkNamespacePath=/run/netns/gateway-printer
+ExecStart=/usr/lib/stitkovac-gateway/gateway-lab --mode printer --address 0.0.0.0:9100
+Restart=on-failure
+RestartSec=2
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/data/lab/prints
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

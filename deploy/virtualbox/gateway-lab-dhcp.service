@@ -1,0 +1,17 @@
+[Unit]
+Description=DHCP client of the simulated gateway printer
+After=gateway-lab-network.service stitkovac-gateway.service
+Requires=gateway-lab-network.service
+
+[Service]
+NetworkNamespacePath=/run/netns/gateway-printer
+ExecStart=/usr/bin/busybox udhcpc -f -i eth0 -s /usr/lib/stitkovac-gateway/lab-lease -x hostname:simulated-pc42e
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/run/gateway-lab
+
+[Install]
+WantedBy=multi-user.target
