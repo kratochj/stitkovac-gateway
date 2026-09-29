@@ -34,6 +34,7 @@ type Report struct {
 }
 type Remote interface {
 	Source() string
+	CredentialID() string
 	Command(context.Context) (*Command, error)
 	Report(context.Context, string, Report) error
 	Activate(context.Context, string, int64) (bool, error)
@@ -43,6 +44,7 @@ type Drainer interface {
 	Pause(context.Context) error
 	Resume()
 	Source() string
+	CredentialID() string
 }
 type journal struct {
 	Command      Command `json:"command"`
@@ -128,7 +130,13 @@ func (c *Controller) phase(s *journal, state, reason string) error {
 	}
 	return err
 }
+func (c *Controller) current(remote Remote) bool {
+	return remote.Source() == c.drainer.Source() && remote.CredentialID() == c.drainer.CredentialID()
+}
 func (c *Controller) send(ctx context.Context, remote Remote, s *journal) error {
+	if !c.current(remote) {
+		return errors.New("cloud registration changed")
+	}
 	if err := remote.Report(ctx, s.Command.ID, s.Report); err != nil {
 		return err
 	}
@@ -168,7 +176,7 @@ func (c *Controller) Run(ctx context.Context) {
 	}
 }
 func (c *Controller) handle(parent context.Context, remote Remote) {
-	if parent.Err() != nil {
+	if parent.Err() != nil || !c.current(remote) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
@@ -227,14 +235,14 @@ func (c *Controller) handle(parent context.Context, remote Remote) {
 			_ = c.send(ctx, remote, &s)
 		}
 	}
-	if remote.Source() != c.drainer.Source() {
+	if !c.current(remote) {
 		return
 	}
 	if command.From != c.version {
 		fail("precondition_failed")
 		return
 	}
-	if remote.Source() != c.drainer.Source() {
+	if !c.current(remote) {
 		return
 	}
 	if time.Now().Unix() >= command.Expires {
@@ -304,7 +312,7 @@ func (c *Controller) handle(parent context.Context, remote Remote) {
 			c.drainer.Resume()
 		}
 	}()
-	if remote.Source() != c.drainer.Source() {
+	if !c.current(remote) {
 		return
 	}
 	if time.Now().Unix() >= command.Expires {

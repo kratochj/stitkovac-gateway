@@ -27,6 +27,7 @@ type remoteFake struct {
 	activateErr error
 }
 
+func (r *remoteFake) CredentialID() string                          { return "credential-test" }
 func (r *remoteFake) Source() string                                { return "https://cloud.example#test" }
 func (r *remoteFake) Command(context.Context) (*Command, error)     { return r.command, nil }
 func (r *remoteFake) State(context.Context, string) (string, error) { return r.state, nil }
@@ -49,6 +50,7 @@ type drainerFake struct {
 
 func (d *drainerFake) Pause(context.Context) error { d.paused = true; return d.err }
 func (d *drainerFake) Resume()                     { d.paused = false }
+func (d *drainerFake) CredentialID() string        { return "credential-test" }
 func (d *drainerFake) Source() string {
 	if d.source != "" {
 		return d.source

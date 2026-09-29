@@ -5,6 +5,7 @@ package cloud
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -354,10 +355,12 @@ func (c *Client) Report(ctx context.Context, e telemetry.Event) error {
 
 // Scope durable commands to the origin and immutable device identity, not a rotating token.
 func configSource(base, id string) string { return base + "#" + id }
+func credentialID(token string) string    { return fmt.Sprintf("%x", sha256.Sum256([]byte(token))) }
 
 type otaRemote struct{ client *Client }
 
-func (r otaRemote) Source() string { return configSource(r.client.base, r.client.id) }
+func (r otaRemote) Source() string       { return configSource(r.client.base, r.client.id) }
+func (r otaRemote) CredentialID() string { return credentialID(r.client.token) }
 func (r otaRemote) Command(ctx context.Context) (*ota.Command, error) {
 	var response struct {
 		Command *ota.Command `json:"command"`

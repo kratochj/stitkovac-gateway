@@ -201,3 +201,9 @@ func (m *Manager) Source() string {
 	defer m.mu.RUnlock()
 	return configSource(m.config.URL, m.id)
 }
+
+func (m *Manager) CredentialID() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return credentialID(m.config.Token)
+}

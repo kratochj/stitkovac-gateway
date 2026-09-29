@@ -201,8 +201,12 @@ func TestOTASourceSurvivesTokenRotationButNotOriginChange(t *testing.T) {
 	cfg := Config{URL: "https://cloud.example", Token: strings.Repeat("a", 32)}
 	m := NewManager(t.TempDir(), "gateway-test", cfg, nil)
 	source := m.Source()
+	credential := m.CredentialID()
 	if err := m.Save(cfg.URL, strings.Repeat("b", 32)); err != nil {
 		t.Fatal(err)
+	}
+	if m.CredentialID() == credential {
+		t.Fatal("old credential was not fenced after rotation")
 	}
 	if m.Source() != source {
 		t.Fatal("token rotation lost ownership of a durable OTA result")
