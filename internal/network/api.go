@@ -42,6 +42,17 @@ func (c *Controller) handler() http.Handler {
 			} else {
 				err = c.Apply(req)
 			}
+		case "POST /wifi-admin":
+			var req struct {
+				Enabled *bool `json:"enabled"`
+			}
+			d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128))
+			d.DisallowUnknownFields()
+			if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF || req.Enabled == nil {
+				err = ErrInvalid
+			} else {
+				err = c.SetWiFiAdmin(*req.Enabled)
+			}
 		case "POST /ap":
 			err = c.ServiceAP(true)
 		case "POST /uplink":
@@ -173,4 +184,10 @@ func (c *Client) ServiceAP(ctx context.Context, enable bool) error {
 		path = "/ap"
 	}
 	return c.request(ctx, "POST", path, nil, nil)
+}
+
+func (c *Client) SetWiFiAdmin(ctx context.Context, enabled bool) error {
+	return c.request(ctx, "POST", "/wifi-admin", struct {
+		Enabled bool `json:"enabled"`
+	}{enabled}, nil)
 }

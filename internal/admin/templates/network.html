@@ -11,6 +11,14 @@
 <dl><dt>IPv4 adresa</dt><dd>{{if .Link.Address}}{{.Link.Address}}{{else}}Nepřidělená{{end}}</dd><dt>Výchozí brána</dt><dd>{{if .Link.Gateway}}{{.Link.Gateway}}{{else}}Žádná{{end}}</dd><dt>DNS</dt><dd>{{range .Link.DNS}}{{.}} {{else}}Žádné{{end}}</dd><dt>Tisková síť</dt><dd>{{.PrinterCIDR}}</dd></dl>
 <a class="refresh" href="/network">Obnovit stav</a></section>
 {{end}}
+<section><h2>Přístup do administrace přes Wi-Fi</h2>
+{{if .Network.WiFiAdminSupported}}
+<p>Stav: <strong>{{if .Network.WiFiAdminEnabled}}povolený{{else}}vypnutý{{end}}</strong>. Přístup používá HTTPS a stejné heslo jako administrace přes kabel. SSH se nezpřístupní.</p>
+{{if .WiFiURL}}<p>Adresa v síti zákazníka: <a href="{{.WiFiURL}}">{{.WiFiURL}}</a></p>{{else}}{{if .Network.WiFiAdminEnabled}}<p>Adresa bude dostupná po připojení k Wi-Fi zákazníka s privátní IPv4 adresou.</p>{{end}}{{end}}
+<p>Izolace zařízení v zákaznické síti může přístup blokovat. Při změně DHCP adresy použijte novou adresu. Prohlížeč může vyžadovat potvrzení vlastního certifikátu brány.</p>
+<form method="post" action="/network/wifi-admin"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="enabled" value="{{if .Network.WiFiAdminEnabled}}0{{else}}1{{end}}"><button type="submit">{{if .Network.WiFiAdminEnabled}}Vypnout přístup přes Wi-Fi{{else}}Povolit administraci přes Wi-Fi{{end}}</button></form>
+{{else}}<p>Tato funkce vyžaduje jednorázovou servisní aktualizaci brány přes kabel.</p>{{end}}
+</section>
 <section class="cloud-settings"><h2>Wi-Fi zákazníka</h2><p>Brána ověří připojení, IP adresu, DNS a TLS spojení se serverem. Pokud ověření neprojde, obnoví původní síť nebo servisní AP do 90 sekund. Změnu provádějte mimo tisk.</p>
 <form method="post" action="/network/scan"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Vyhledat sítě</button></form>
 {{if .Networks}}<div class="table-wrap"><table><caption>Nalezené sítě</caption><thead><tr><th>Název sítě</th><th>Signál</th><th>Zabezpečení</th></tr></thead><tbody>{{range .Networks}}<tr><td>{{.SSID}}</td><td>{{.Signal}} %</td><td>{{.Security}}</td></tr>{{end}}</tbody></table></div>{{end}}

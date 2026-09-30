@@ -23,4 +23,4 @@ arm64:
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o bin/gateway-update-linux-arm64 ./cmd/gateway-update
 
 lab-arm64: arm64
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o bin/gateway-lab-linux-arm64 ./cmd/gateway-lab
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags '-X main.version=$(VERSION)' -o bin/gateway-lab-linux-arm64 ./cmd/gateway-lab

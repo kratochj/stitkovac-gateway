@@ -24,6 +24,10 @@ Chyby se hlásí do Rollbaru přes server Štítkovače.
 - Explicitní inicializace identity, soukromého úložiště a HTTPS certifikátu.
 - SQLite WAL/FULL journal a obnova nejistých tiskových pokusů bez automatického opakování.
 - DHCPv4 s trvalou MAC/IP rezervací před OFFER a záznamem lease před ACK.
+- Verzovaná synchronizace DHCP se serverem, registrace tiskáren po lease, servis konfliktů a výměny.
+- Ruční uzavření nejistého tisku, retence dokumentů a historie s trvalou deduplikací.
+- Změny servisních přístupů a panic recovery s původním místem chyby.
+- Sestavený OS image 0.1.8 pro RPi 3 B+, per-device bootstrap a ověřený read-only druhý boot v QEMU; fyzické hardwarové ověření dosud neproběhlo.
 - HTTPS servisní přihlášení s Argon2id a přehled nalezených zařízení.
 - Nastavení serveru a tokenu ve webu, trvalé uložení a přepnutí WSS spojení bez restartu.
 - Síťová administrace: Wi-Fi s rollbackem, servisní AP, GPIO a trvalé profily přes root helper.
@@ -60,6 +64,8 @@ Linux; lokální příkaz bez dalších parametrů nespouští DHCP ani cloudov�
 Další informace:
 
 - [Testovací VirtualBox build se simulovanou tiskárnou](docs/virtualbox-lab.md).
+- [Správa tiskáren a provozní dokončení](docs/printer-operations.md).
+- [Kompletní OS image](docs/os-image.md).
 - [Síťová administrace a provisioning](docs/network-administration.md).
 - [Historie a diagnostika tisku](docs/print-diagnostics.md).
 - [Stav implementace a zbývající práce](docs/implementation-status.md).
@@ -67,3 +73,6 @@ Další informace:
 - [Instalace a bezpečný pilot](docs/installation.md).
 - [Gateway API v1](docs/protocol-v1.md).
 - [Rozhodnutí o DHCP backendu](docs/adr-001-dhcp.md).
+
+Administrace přes zákaznickou Wi-Fi a jednorázový upgrade staršího image:
+[postup servisní aktualizace](docs/wifi-admin.md).

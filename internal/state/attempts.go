@@ -45,6 +45,12 @@ func (s *Store) Prepare(ctx context.Context, a Attempt) error {
 	}
 	defer tx.Rollback()
 	var n int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM tombstones WHERE job_uid=? AND attempt_id=?", a.JobUID, a.AttemptID).Scan(&n); err != nil {
+		return err
+	}
+	if n != 0 {
+		return ErrConflict
+	}
 	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM reservations WHERE mac=? AND ip=? AND declined=0", mac, a.IP).Scan(&n); err != nil {
 		return err
 	}
@@ -80,7 +86,7 @@ func (s *Store) Attempt(ctx context.Context, job, attempt string) (Attempt, erro
 func (s *Store) BeginSend(ctx context.Context, job, attempt string, now time.Time) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE attempts SET state='SENDING' WHERE job_uid=? AND attempt_id=? AND state='CLAIMED' AND expires_at>?
 AND EXISTS (SELECT 1 FROM reservations r WHERE r.mac=attempts.mac AND r.ip=attempts.ip AND r.declined=0)
-AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.ip=attempts.ip AND a.port=attempts.port AND a.state IN ('SENDING','UNKNOWN'))`, job, attempt, now.Unix())
+AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.ip=attempts.ip AND a.port=attempts.port AND (a.state='SENDING' OR (a.state='UNKNOWN' AND NOT EXISTS (SELECT 1 FROM resolutions r WHERE r.job_uid=a.job_uid AND r.attempt_id=a.attempt_id AND r.acknowledged=1))))`, job, attempt, now.Unix())
 	return changed(result, err)
 }
 
@@ -111,11 +117,27 @@ func (s *Store) Recover(ctx context.Context, now time.Time) error {
 
 // Acknowledge drops only the document, keeping a durable deduplication tombstone.
 func (s *Store) Acknowledge(ctx context.Context, job, attempt, result string) error {
-	r, err := s.db.ExecContext(ctx, "UPDATE attempts SET document=NULL WHERE job_uid=? AND attempt_id=? AND state=? AND state IN ('SENT','FAILED','EXPIRED')", job, attempt, result)
-	return changed(r, err)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	r, err := tx.ExecContext(ctx, "UPDATE attempts SET document=NULL WHERE job_uid=? AND attempt_id=? AND state=? AND state IN ('SENT','FAILED','EXPIRED','UNKNOWN')", job, attempt, result)
+	if err = changed(r, err); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO attempt_delivery VALUES(?,?,1) ON CONFLICT(job_uid,attempt_id) DO UPDATE SET acknowledged=1", job, attempt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) Expire(ctx context.Context, job, attempt string, now time.Time) error {
 	r, err := s.db.ExecContext(ctx, "UPDATE attempts SET state='EXPIRED',reason='expired_before_send' WHERE job_uid=? AND attempt_id=? AND state='CLAIMED' AND expires_at<=?", job, attempt, now.Unix())
+	return changed(r, err)
+}
+
+func (s *Store) MarkUncertain(ctx context.Context, job, attempt string) error {
+	r, err := s.db.ExecContext(ctx, "UPDATE attempts SET state='UNKNOWN',reason='interrupted_send' WHERE job_uid=? AND attempt_id=? AND state='CLAIMED'", job, attempt)
 	return changed(r, err)
 }

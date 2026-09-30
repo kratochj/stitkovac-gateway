@@ -1,0 +1,4 @@
+FROM stitkovac-image-builder:local
+RUN apt-get update && apt-get install -y --no-install-recommends qemu-system-arm device-tree-compiler \
+    && rm -rf /var/lib/apt/lists/*
+ENTRYPOINT ["python3", "/source/scripts/image/smoke-boot.py"]

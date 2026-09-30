@@ -18,7 +18,10 @@ import (
 
 var ErrConflict = errors.New("state conflict")
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db      *sql.DB
+	changes chan struct{}
+}
 
 func ID() string {
 	b := make([]byte, 16)
@@ -41,7 +44,7 @@ func connect(path string, create bool) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{db: db, changes: make(chan struct{}, 1)}
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, err
@@ -81,7 +84,7 @@ func Initialize(dir, passwordHash string) (*Store, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec(schema + historySchema); err == nil {
+	if _, err = tx.Exec(schema + historySchema + operationsSchema); err == nil {
 		_, err = tx.Exec("INSERT INTO identity(singleton, gateway_id, password_hash) VALUES (1, ?, ?)", ID(), passwordHash)
 	}
 	if err == nil {
@@ -136,7 +139,7 @@ func Open(dir string) (*Store, error) {
 		var tx *sql.Tx
 		tx, err = s.db.BeginTx(context.Background(), nil)
 		if err == nil {
-			_, err = tx.Exec(historySchema)
+			_, err = tx.Exec(historySchema + operationsSchema)
 			if err == nil {
 				err = tx.Commit()
 			} else {

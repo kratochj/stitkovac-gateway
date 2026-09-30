@@ -139,18 +139,38 @@ type Link struct {
 	Connected bool     `json:"connected"`
 }
 type Status struct {
-	Available     bool   `json:"available"`
-	Simulation    bool   `json:"simulation"`
-	Mode          string `json:"mode"`
-	Phase         string `json:"phase"`
-	Error         string `json:"error"`
-	SSID          string `json:"ssid"`
-	Country       string `json:"country"`
-	APSSID        string `json:"apSSID"`
-	APAddress     string `json:"apAddress"`
-	APUntil       int64  `json:"apUntil"`
-	PrinterCIDR   string `json:"printerCIDR"`
-	WiFiInterface string `json:"wifiInterface"`
-	GPIO          bool   `json:"gpio"`
-	Link          Link   `json:"link"`
+	WiFiAdminSupported bool   `json:"wifiAdminSupported"`
+	WiFiAdminEnabled   bool   `json:"wifiAdminEnabled"`
+	Available          bool   `json:"available"`
+	Simulation         bool   `json:"simulation"`
+	Mode               string `json:"mode"`
+	Phase              string `json:"phase"`
+	Error              string `json:"error"`
+	SSID               string `json:"ssid"`
+	Country            string `json:"country"`
+	APSSID             string `json:"apSSID"`
+	APAddress          string `json:"apAddress"`
+	APUntil            int64  `json:"apUntil"`
+	PrinterCIDR        string `json:"printerCIDR"`
+	WiFiInterface      string `json:"wifiInterface"`
+	GPIO               bool   `json:"gpio"`
+	Link               Link   `json:"link"`
+}
+
+// WiFiAdminAddress never exposes the web on a trial, service AP or overlapping subnet.
+func (s Status) WiFiAdminAddress() string {
+	if !s.WiFiAdminSupported || !s.WiFiAdminEnabled || !s.Available || s.Mode != "uplink" || !s.Link.Connected || s.Simulation {
+		return ""
+	}
+	p, err := netip.ParsePrefix(s.Link.Address)
+	if err != nil || !p.Addr().Is4() || !p.Addr().IsPrivate() {
+		return ""
+	}
+	for _, reserved := range []string{s.PrinterCIDR, s.APAddress} {
+		other, err := netip.ParsePrefix(reserved)
+		if err != nil || p.Overlaps(other) {
+			return ""
+		}
+	}
+	return netip.AddrPortFrom(p.Addr(), 8443).String()
 }

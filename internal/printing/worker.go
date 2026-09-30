@@ -46,6 +46,15 @@ func (w *Worker) Process(ctx context.Context, a state.Attempt, cloud Cloud) erro
 	if err != nil {
 		return err
 	}
+	if current.State == "CLAIMED" && a.State == "STARTED" {
+		if err := w.Store.MarkUncertain(ctx, a.JobUID, a.AttemptID); err != nil {
+			return err
+		}
+		current, err = w.Store.Attempt(ctx, a.JobUID, a.AttemptID)
+		if err != nil {
+			return err
+		}
+	}
 	if current.State == "CLAIMED" {
 		if current.ExpiresAt <= time.Now().Unix() {
 			if err := w.Store.Expire(ctx, current.JobUID, current.AttemptID, time.Now()); err != nil {
@@ -76,9 +85,6 @@ func (w *Worker) Process(ctx context.Context, a state.Attempt, cloud Cloud) erro
 	}
 	if err := cloud.Result(ctx, current); err != nil {
 		return err
-	}
-	if current.State == "UNKNOWN" {
-		return nil
 	}
 	return w.Store.Acknowledge(ctx, current.JobUID, current.AttemptID, current.State)
 }

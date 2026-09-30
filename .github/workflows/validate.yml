@@ -6,7 +6,8 @@ permissions:
   contents: read
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    # Netfilter integration needs native Netlink support, not user-mode QEMU.
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -14,10 +15,8 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: python3 -m unittest discover -s deploy/systemd -p "test_*.py"
+      - run: python3 -m unittest discover -s scripts/image -p "test_*.py"
       - run: make VERSION=0.1.0 check test build arm64
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
       - run: sh scripts/test-network.sh
       - run: sh scripts/test-ota.sh
       - run: sh scripts/package.sh 0.1.0-dev

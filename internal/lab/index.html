@@ -1,7 +1,37 @@
-<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Štítkovač – testovací laboratoř</title><style>
-body{font:16px system-ui,sans-serif;background:#f1f4f2;color:#19372b;max-width:1080px;margin:40px auto;padding:0 24px}h1{font-size:32px}section{background:white;padding:24px;margin:20px 0;border:1px solid #c8d4cd;border-radius:12px}button,a.button{background:#245940;color:white;border:0;border-radius:6px;padding:14px 20px;font:inherit;display:inline-block;cursor:pointer}button:disabled{opacity:.5}a{color:#245940}table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:12px 8px;border-bottom:1px solid #dde5df}code{font-size:12px;overflow-wrap:anywhere}small{color:#53695d}.scroll{overflow:auto}.status{font-weight:700}form{display:inline}li{margin:12px 0}
-</style></head><body><h1>Testovací laboratoř brány</h1><p>Samostatné prostředí ve VirtualBoxu. Tiskové úlohy zůstávají v této VM.</p>
-<section><h2>Spojení a tiskárna</h2><p class="status">Brána: {{if .Online}}připojena přes WSS{{else}}čeká se na připojení{{end}}</p><p><small>ID brány</small><br><code>{{.Gateway}}</code></p><p>Simulovaná tiskárna: {{if .Lease.IP}}<strong>{{.Lease.IP}}:9100</strong> · MAC <code>{{.Lease.MAC}}</code>{{else}}čeká na DHCP adresu{{end}}</p><a href="https://127.0.0.1:8443/" target="_blank" rel="noreferrer">Administrace brány a DHCP rezervace</a></section>
-<section><h2>Vyzkoušet tisk</h2><p>Dokument projde přes WSS/HTTPS, tiskovou evidenci brány a skutečné TCP spojení do simulátoru.</p><form method="post" action="/print"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="kind" value="label" {{if not .Lease.IP}}disabled{{end}}>Vytisknout testovací štítek</button> <button name="kind" value="receipt" {{if not .Lease.IP}}disabled{{end}}>Vytisknout testovací účtenku</button></form><p><a href="/">Obnovit stav a přijaté dokumenty</a></p></section>
-<section><h2>Přijaté dokumenty</h2><p><small>Simulátor uchovává posledních 50 TCP přenosů. PDF lze otevřít v prohlížeči.</small></p><ul>{{range .Files}}<li><a href="/captures/{{.}}" target="_blank" rel="noreferrer"><code>{{.}}</code></a></li>{{else}}<li>Zatím nebyl přijat žádný dokument.</li>{{end}}</ul></section>
-<section><h2>Tiskové úlohy</h2><p><small>SENT znamená odeslané bajty. Fyzická tiskárna zde není připojená.</small></p><div class="scroll"><table><thead><tr><th>Dokument</th><th>Úloha</th><th>Výsledek</th></tr></thead><tbody>{{range .Jobs}}<tr><td>{{if eq .Kind "receipt"}}Účtenka{{else}}Štítek{{end}}</td><td><code>{{.Attempt.JobUID}}</code></td><td>{{.Attempt.State}}</td></tr>{{else}}<tr><td colspan="3">Zadejte první testovací tisk.</td></tr>{{end}}</tbody></table></div></section></body></html>
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Štítkovač – testovací laboratoř</title><style>
+body{font:16px system-ui,sans-serif;background:#f1f4f2;color:#19372b;max-width:1080px;margin:40px auto;padding:0 24px}h1{font-size:32px}section{background:white;padding:24px;margin:20px 0;border:1px solid #c8d4cd;border-radius:12px}button,a.button{background:#245940;color:white;border:0;border-radius:6px;padding:14px 20px;font:inherit;display:inline-block;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}a{color:#245940}table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:12px 8px;border-bottom:1px solid #dde5df}code{font-size:12px;overflow-wrap:anywhere}small{color:#53695d}.scroll{overflow:auto}.status{font-weight:700}form{display:inline}li{margin:12px 0}.notice,[data-state=stale]{color:#824500}.capture-name{display:block;margin-top:4px}time{white-space:nowrap}.live-bar{padding:12px 0}.live-bar small{display:block;margin:6px 0}
+</style><script src="/static/live.js" defer></script></head><body>
+<h1>Testovací laboratoř brány</h1>
+<p><small>Verze laboratoře {{.Version}}</small></p>
+<p>Simulovaná tiskárna zachycuje dokumenty z brány. Místní testovací server má vlastní, oddělenou historii úloh.</p>
+<div class="live-bar"><span id="live-status" role="status" data-state="connecting">Připojuji živý přehled…</span><small>Poslední ověření: <span id="last-checked">čeká na spojení</span></small><a href="/">Obnovit přehled</a></div>
+<noscript><p class="notice">JavaScript je vypnutý. Pro aktuální stav použijte Obnovit přehled.</p></noscript>
+<div id="live-content">{{template "dashboard" .}}</div>
+</body></html>
+{{define "dashboard"}}
+<section id="printer"><h2>Simulovaná tiskárna</h2>
+<p>Poslední přidělená DHCP adresa: {{if .Lease.IP}}<strong>{{.Lease.IP}}:9100</strong> · MAC <code>{{.Lease.MAC}}</code>{{else}}zatím není dostupná{{end}}</p>
+<p>Fyzická tiskárna zde není připojená. Přehled níže ukazuje skutečné bajty přijaté TCP simulátorem.</p>
+<a href="https://127.0.0.1:8443/" target="_blank" rel="noreferrer">Administrace brány a DHCP rezervace</a> · <a href="https://127.0.0.1:8443/jobs" target="_blank" rel="noreferrer">Tiskové úlohy zpracované bránou</a>
+</section>
+<section id="captures"><h2>Dokumenty přijaté tiskárnou</h2>
+<p>Skutečně zachycené přenosy, včetně tisku z připojeného cloudového serveru. Nové dokumenty se zobrazují automaticky. Uchovává se posledních 50 přenosů.</p>
+{{if .CaptureError}}<p class="notice" role="alert">Seznam přijatých dokumentů se nepodařilo celý načíst. Zobrazené údaje mohou být neúplné.</p>{{end}}
+<div class="scroll"><table><thead><tr><th>Přijato</th><th>Dokument</th><th>Velikost</th><th>Výsledek</th></tr></thead><tbody>
+{{range .Files}}<tr><td><time datetime="{{stamp .ReceivedAt}}">{{stamp .ReceivedAt}}</time></td><td><a href="/captures/{{.Name}}" target="_blank" rel="noreferrer">Otevřít dokument<span class="capture-name"><code>{{.Name}}</code></span></a></td><td>{{.Size}} B</td><td>Zachyceno v simulátoru</td></tr>
+{{else}}<tr><td colspan="4">{{if .CaptureError}}Příjem dokumentů nyní nelze ověřit.{{else}}Zatím nebyl přijat žádný dokument.{{end}}</td></tr>{{end}}
+</tbody></table></div></section>
+<section id="local-server"><h2>Místní testovací server</h2>
+<p class="status">{{if .Online}}Brána je připojena přes WSS k místnímu testovacímu serveru.{{else}}Brána není připojená k místnímu testovacímu serveru.{{end}}</p>
+{{if .Online}}<p><small>ID brány</small><br><code>{{.Gateway}}</code></p>{{else}}<p class="notice">Pokud brána používá cloudový server, zadávejte tisk v aplikaci nebo na tomto serveru. Přijaté dokumenty se zobrazí nahoře. Toto není informace o dostupnosti brány v cloudu.</p>{{end}}
+<p>Tato tlačítka odesílají testovací úlohy pouze přes místní server. Vyžadují jeho WSS spojení s bránou a přidělenou adresu tiskárny.</p>
+<form method="post" action="/print"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="kind" value="label" {{if or (not .Online) (not .Lease.IP)}}disabled{{end}}>Vytisknout testovací štítek</button> <button name="kind" value="receipt" {{if or (not .Online) (not .Lease.IP)}}disabled{{end}}>Vytisknout testovací účtenku</button></form>
+</section>
+<section id="local-jobs"><h2>Historie úloh místního testovacího serveru</h2>
+<p>Jsou zde pouze úlohy vytvořené tlačítky v této laboratoři. Úlohy z cloudového serveru do této historie nepatří. SENT znamená odeslané bajty, nikoli potvrzení fyzického tisku.</p>
+<div class="scroll"><table><thead><tr><th>Vytvořeno</th><th>Dokument</th><th>Úloha</th><th>Výsledek</th><th>Změna stavu</th></tr></thead><tbody>
+{{range .Jobs}}<tr><td>{{if .CreatedAt}}<time datetime="{{stamp .CreatedAt}}">{{stamp .CreatedAt}}</time>{{else}}<small>Čas nebyl zaznamenán</small>{{end}}</td><td>{{if eq .Kind "receipt"}}Účtenka{{else}}Štítek{{end}}</td><td><code>{{.Attempt.JobUID}}</code></td><td>{{.Attempt.State}}</td><td>{{if .UpdatedAt}}<time datetime="{{stamp .UpdatedAt}}">{{stamp .UpdatedAt}}</time>{{else}}<small>Čas nebyl zaznamenán</small>{{end}}</td></tr>
+{{else}}<tr><td colspan="5">Místní testovací server zatím nemá žádné úlohy.</td></tr>{{end}}
+</tbody></table></div></section>
+{{end}}

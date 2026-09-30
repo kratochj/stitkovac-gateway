@@ -1,0 +1,211 @@
+---
+# Run over printer-side Ethernet during a print-free maintenance window.
+- name: Upgrade Wi-Fi administration on an initialized ARM64 appliance
+  hosts: gateways
+  become: true
+  gather_facts: true
+  vars:
+    ansible_remote_tmp: /tmp/ansible-gateway-service
+    gateway_service_version: 0.1.9
+    gateway_service_release: "{{ playbook_dir }}/../../dist/releases/{{ gateway_service_version }}"
+    gateway_service_helper: "{{ playbook_dir }}/../../bin/gateway-network-linux-arm64"
+    gateway_service_backup: "/data/service-backups/wifi-admin-{{ gateway_service_version }}"
+  tasks:
+    - name: Require an explicit maintenance window and supported appliance
+      ansible.builtin.assert:
+        that:
+          - gateway_wifi_admin_maintenance | default(false) | bool
+          - not ansible_check_mode
+          - ansible_facts.system == 'Linux'
+          - ansible_facts.architecture == 'aarch64'
+          - gateway_service_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+        fail_msg: Finish printing and run this playbook over printer-side Ethernet with gateway_wifi_admin_maintenance=true.
+
+    - name: Require completed image initialization
+      ansible.builtin.command: test -f /data/gateway-image-ready
+      changed_when: false
+
+    - name: Require read-only root and persistent storage
+      ansible.builtin.command:
+        argv: [/usr/lib/stitkovac-gateway/check-storage]
+      changed_when: false
+
+    - name: Read existing network configuration without exposing credentials
+      ansible.builtin.slurp:
+        src: /etc/stitkovac-gateway/network.json
+      register: gateway_service_config
+      no_log: true
+
+    - name: Preserve installed interface names and addresses
+      ansible.builtin.set_fact:
+        gateway_wifi_interface: "{{ (gateway_service_config.content | b64decode | from_json).wifiInterface }}"
+        gateway_printer_interface: "{{ (gateway_service_config.content | b64decode | from_json).printerInterface }}"
+        gateway_printer_address: "{{ (gateway_service_config.content | b64decode | from_json).printerCIDR.split('/')[0] }}"
+        gateway_ap_address: "{{ (gateway_service_config.content | b64decode | from_json).apCIDR.split('/')[0] }}"
+        gateway_ap_network: "{{ (gateway_service_config.content | b64decode | from_json).apCIDR.rsplit('.', 1)[0] + '.0/24' }}"
+      no_log: true
+
+    - name: Validate existing network configuration
+      ansible.builtin.command: /usr/lib/stitkovac-gateway/gateway-network --check
+      changed_when: false
+
+    - name: Read signed release selection
+      ansible.builtin.command: /usr/lib/stitkovac-gateway/gateway-update status
+      register: gateway_service_selection
+      changed_when: false
+
+    - name: Refuse an update already in progress
+      ansible.builtin.assert:
+        that:
+          - not (gateway_service_selection.stdout | from_json).trial
+          - (gateway_service_selection.stdout | from_json).pending | default('') == ''
+
+    - name: Prepare and verify service files before stopping printing
+      block:
+        - name: Create private staging directory
+          ansible.builtin.file:
+            path: /data/gateway-service-stage
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Stage signed application files
+          ansible.builtin.copy:
+            src: "{{ gateway_service_release }}/{{ item }}"
+            dest: "/data/gateway-service-stage/{{ item }}"
+            owner: stitkovac-gateway
+            group: stitkovac-gateway
+            mode: '0600'
+          loop: [gateway, manifest.json]
+
+        - name: Stage network helper
+          ansible.builtin.copy:
+            src: "{{ gateway_service_helper }}"
+            dest: /data/gateway-service-stage/gateway-network
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Check new helper against retained configuration
+          ansible.builtin.command: /data/gateway-service-stage/gateway-network --check
+          changed_when: false
+
+        - name: Render and validate firewall without applying it
+          ansible.builtin.template:
+            src: gateway-network.nft.j2
+            dest: /data/gateway-service-stage/firewall.nft
+            owner: root
+            group: root
+            mode: '0600'
+            validate: /usr/sbin/nft --check --file %s
+
+        - name: Preserve original system files for manual recovery
+          ansible.builtin.file:
+            path: "{{ gateway_service_backup }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: Back up helper and firewall once
+          ansible.builtin.copy:
+            src: "{{ item.src }}"
+            dest: "{{ gateway_service_backup }}/{{ item.name }}"
+            remote_src: true
+            force: false
+            mode: '0600'
+          loop:
+            - {src: /usr/lib/stitkovac-gateway/gateway-network, name: gateway-network}
+            - {src: /etc/nftables.d/stitkovac-gateway.nft, name: firewall.nft}
+
+        - name: Stop print agent for the authorized maintenance window
+          ansible.builtin.systemd_service:
+            name: stitkovac-gateway
+            state: stopped
+
+        - name: Verify signature using existing trust anchors and stage release
+          ansible.builtin.command:
+            argv: [runuser, -u, stitkovac-gateway, --, /usr/lib/stitkovac-gateway/gateway-update, stage, --manifest, /data/gateway-service-stage/manifest.json, --artifact, /data/gateway-service-stage/gateway]
+          changed_when: true
+
+        - name: Verify expected release version
+          ansible.builtin.command:
+            argv: [runuser, -u, stitkovac-gateway, --, /usr/lib/stitkovac-gateway/gateway-update, verify, --version, "{{ gateway_service_version }}"]
+          changed_when: false
+
+        - name: Stop network helper during replacement
+          ansible.builtin.systemd_service:
+            name: stitkovac-gateway-network
+            state: stopped
+
+        - name: Install system changes with read-only restoration
+          block:
+            - name: Temporarily unlock root
+              ansible.builtin.command: mount -o remount,rw /
+              changed_when: true
+
+            - name: Install the new helper
+              ansible.builtin.copy:
+                src: /data/gateway-service-stage/gateway-network
+                dest: /usr/lib/stitkovac-gateway/gateway-network
+                remote_src: true
+                owner: root
+                group: root
+                mode: '0755'
+
+            - name: Install firewall preserving existing network addresses
+              ansible.builtin.copy:
+                src: /data/gateway-service-stage/firewall.nft
+                dest: /etc/nftables.d/stitkovac-gateway.nft
+                remote_src: true
+                owner: root
+                group: root
+                mode: '0644'
+          always:
+            - name: Flush filesystem changes
+              ansible.builtin.command: sync
+              changed_when: false
+            - name: Restore read-only root
+              ansible.builtin.command: mount -o remount,ro /
+              changed_when: true
+
+        - name: Load the validated firewall
+          ansible.builtin.command: nft --file /etc/nftables.d/stitkovac-gateway.nft
+          changed_when: true
+
+        - name: Start the network helper
+          ansible.builtin.systemd_service:
+            name: stitkovac-gateway-network
+            state: started
+
+        - name: Request application trial with automatic launcher rollback
+          ansible.builtin.command:
+            argv: [runuser, -u, stitkovac-gateway, --, /usr/lib/stitkovac-gateway/gateway-update, request, --version, "{{ gateway_service_version }}"]
+          changed_when: true
+          when: (gateway_service_selection.stdout | from_json).active != gateway_service_version
+
+        - name: Start printing and administration
+          ansible.builtin.systemd_service:
+            name: stitkovac-gateway
+            state: started
+
+        - name: Wait for confirmed application startup
+          ansible.builtin.command: /usr/lib/stitkovac-gateway/gateway-update status
+          register: gateway_service_result
+          changed_when: false
+          until:
+            - (gateway_service_result.stdout | from_json).active == gateway_service_version
+            - not (gateway_service_result.stdout | from_json).trial
+            - (gateway_service_result.stdout | from_json).pending | default('') == ''
+          retries: 20
+          delay: 3
+      always:
+        - name: Remove private staging files
+          ansible.builtin.file:
+            path: /data/gateway-service-stage
+            state: absent
+
+    - name: Report completion
+      ansible.builtin.debug:
+        msg: Open Network in the wired administration and enable Wi-Fi access. Credentials, printer settings and print history were preserved. SSH remains unavailable on customer Wi-Fi.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 	"github.com/kratochj/stitkovac-gateway/internal/lab"
 	"github.com/kratochj/stitkovac-gateway/internal/platform"
 )
+
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -36,11 +39,16 @@ func readSecret(path string) (string, error) {
 	return strings.TrimSpace(string(b)), err
 }
 func run() error {
+	showVersion := flag.Bool("version", false, "Print the lab build version")
 	mode := flag.String("mode", "cloud", "cloud or printer")
 	dir := flag.String("dir", "/data/lab", "Private lab storage")
 	address := flag.String("address", "127.0.0.1:9443", "Listener address")
 	lease := flag.String("lease-file", "/run/gateway-lab/lease.json", "Simulated printer DHCP lease")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return nil
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	captures := filepath.Join(*dir, "prints")
@@ -73,7 +81,7 @@ func run() error {
 			return err
 		}
 	}
-	labServer, err := lab.New(lab.Config{Dir: *dir, Captures: captures, LeaseFile: *lease, Host: *address, Token: token, Password: password})
+	labServer, err := lab.New(lab.Config{Dir: *dir, Captures: captures, LeaseFile: *lease, Host: *address, Version: version, Token: token, Password: password})
 	if err != nil {
 		return err
 	}

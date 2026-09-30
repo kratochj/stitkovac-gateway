@@ -37,6 +37,7 @@ type Controller struct {
 	state          journal
 	status         Status
 	busy, scanBusy bool
+	wifiAdmin      bool
 	fatal          bool
 	lastScan       time.Time
 	changed        chan struct{}
@@ -69,6 +70,9 @@ func NewController(cfg Config, backend Backend) (*Controller, error) {
 			}
 		}
 	}
+	if err := c.loadWiFiAdmin(); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -85,6 +89,8 @@ func (c *Controller) Status() Status {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := c.status
+	s.WiFiAdminSupported = true
+	s.WiFiAdminEnabled = c.wifiAdmin
 	s.Link.DNS = append([]string(nil), s.Link.DNS...)
 	return s
 }

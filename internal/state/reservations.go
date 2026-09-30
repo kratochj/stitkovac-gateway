@@ -52,6 +52,7 @@ func (s *Store) Reserve(ctx context.Context, raw string, pool Pool, now time.Tim
 	if err := pool.Validate(); err != nil {
 		return Reservation{}, err
 	}
+	defer s.Notify()
 	mac, err := MAC(raw)
 	if err != nil {
 		return Reservation{}, err
@@ -75,7 +76,7 @@ func (s *Store) Reserve(ctx context.Context, raw string, pool Pool, now time.Tim
 	}
 	for ip := pool.First; ip.Compare(pool.Last) <= 0; ip = ip.Next() {
 		var n int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM reservations WHERE ip=?", ip.String()).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM reservations WHERE ip=?) + (SELECT count(*) FROM retired_addresses WHERE ip=?)", ip.String(), ip.String()).Scan(&n); err != nil {
 			return Reservation{}, err
 		}
 		if n != 0 {
@@ -92,11 +93,13 @@ func (s *Store) Reserve(ctx context.Context, raw string, pool Pool, now time.Tim
 
 // Lease records the lease before an ACK can leave the gateway.
 func (s *Store) Lease(ctx context.Context, mac, ip string, now time.Time, duration time.Duration) error {
+	defer s.Notify()
 	res, err := s.db.ExecContext(ctx, "UPDATE reservations SET last_seen=?, lease_until=? WHERE mac=? AND ip=? AND declined=0", now.Unix(), now.Add(duration).Unix(), mac, ip)
 	return changed(res, err)
 }
 
 func (s *Store) Release(ctx context.Context, mac, ip string, declined bool) error {
+	defer s.Notify()
 	res, err := s.db.ExecContext(ctx, "UPDATE reservations SET lease_until=0, declined=MAX(declined, ?) WHERE mac=? AND ip=?", declined, mac, ip)
 	return changed(res, err)
 }

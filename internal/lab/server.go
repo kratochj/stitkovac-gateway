@@ -24,22 +24,26 @@ import (
 	"github.com/kratochj/stitkovac-gateway/internal/state"
 )
 
-//go:embed index.html
+//go:embed index.html live.js
 var pageFiles embed.FS
-var page = template.Must(template.ParseFS(pageFiles, "index.html"))
+var page = template.Must(template.New("index.html").Funcs(template.FuncMap{
+	"stamp": func(t int64) string { return time.Unix(t, 0).UTC().Format(time.RFC3339) },
+}).ParseFS(pageFiles, "index.html"))
 var captureName = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}-[a-f0-9]+\.(pdf|bin)$`)
 var identifier = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 type Job struct {
-	Attempt  state.Attempt `json:"attempt"`
-	Kind     string        `json:"kind"`
-	Document []byte        `json:"document"`
+	Attempt   state.Attempt `json:"attempt"`
+	Kind      string        `json:"kind"`
+	Document  []byte        `json:"document"`
+	CreatedAt int64         `json:"createdAt,omitempty"`
+	UpdatedAt int64         `json:"updatedAt,omitempty"`
 }
 type Lease struct {
 	IP  string `json:"ip"`
 	MAC string `json:"mac"`
 }
-type Config struct{ Dir, Captures, LeaseFile, Host, Token, Password string }
+type Config struct{ Dir, Captures, LeaseFile, Host, Version, Token, Password string }
 type Server struct {
 	cfg                    Config
 	mu                     sync.Mutex
@@ -58,6 +62,9 @@ func New(c Config) (*Server, error) {
 	}
 	if c.Host != "127.0.0.1:9443" || len(c.Token) < 32 || len(c.Password) < 16 {
 		return nil, errors.New("invalid isolated lab configuration")
+	}
+	if c.Version == "" {
+		c.Version = "dev"
 	}
 	s := &Server{cfg: c, csrf: state.ID(), wake: make(chan struct{}, 1)}
 	b, err := os.ReadFile(filepath.Join(c.Dir, "jobs.json"))
@@ -84,6 +91,12 @@ func equal(a, b string) bool {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.index)
+	mux.HandleFunc("GET /events", s.events)
+	mux.HandleFunc("GET /static/live.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		b, _ := pageFiles.ReadFile("live.js")
+		w.Write(b)
+	})
 	mux.HandleFunc("POST /print", s.print)
 	mux.HandleFunc("GET /captures/{name}", s.capture)
 	mux.HandleFunc("GET /api/gateway/v1/connect", s.connect)
@@ -102,7 +115,7 @@ func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		if r.TLS == nil || r.Host != s.cfg.Host {
 			http.Error(w, "Neplatná adresa laboratoře.", 421)
 			return
@@ -153,24 +166,8 @@ func (s *Server) lease() (Lease, error) {
 	return lease, nil
 }
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
-	lease, _ := s.lease()
-	files, _ := Captures(s.cfg.Captures)
-	s.mu.Lock()
-	jobs := append([]Job(nil), s.jobs...)
-	online := s.conn != nil
-	gateway := s.gateway
-	s.mu.Unlock()
-	for left, right := 0, len(jobs)-1; left < right; left, right = left+1, right-1 {
-		jobs[left], jobs[right] = jobs[right], jobs[left]
-	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	page.Execute(w, struct {
-		Lease         Lease
-		Files         []string
-		Jobs          []Job
-		Online        bool
-		Gateway, CSRF string
-	}{lease, files, jobs, online, gateway, s.csrf})
+	page.Execute(w, s.snapshot())
 }
 func (s *Server) print(w http.ResponseWriter, r *http.Request) {
 	if r.ParseForm() != nil || !equal(r.Form.Get("csrf"), s.csrf) {
@@ -190,8 +187,13 @@ func (s *Server) print(w http.ResponseWriter, r *http.Request) {
 	uid := state.ID()
 	doc := Document(kind, uid)
 	hash := sha256.Sum256(doc)
-	job := Job{Attempt: state.Attempt{JobUID: uid, AttemptID: state.ID(), MAC: lease.MAC, IP: lease.IP, Port: 9100, Digest: hex.EncodeToString(hash[:]), ExpiresAt: time.Now().Add(5 * time.Minute).Unix(), State: "PENDING"}, Kind: kind, Document: doc}
+	job := Job{Attempt: state.Attempt{JobUID: uid, AttemptID: state.ID(), MAC: lease.MAC, IP: lease.IP, Port: 9100, Digest: hex.EncodeToString(hash[:]), ExpiresAt: time.Now().Add(5 * time.Minute).Unix(), State: "PENDING"}, Kind: kind, Document: doc, CreatedAt: time.Now().Unix(), UpdatedAt: time.Now().Unix()}
 	s.mu.Lock()
+	if s.conn == nil || s.session == "" {
+		s.mu.Unlock()
+		http.Error(w, "Brána není připojená k místnímu testovacímu serveru. Tisk zadejte na serveru, ke kterému je připojená.", 409)
+		return
+	}
 	if len(s.jobs) >= 100 {
 		s.mu.Unlock()
 		http.Error(w, "Laboratoř dosáhla limitu 100 úloh.", 409)
@@ -344,6 +346,7 @@ func (s *Server) transition(w http.ResponseWriter, r *http.Request, start bool) 
 		return
 	}
 	previousState := job.Attempt.State
+	previousUpdated := job.UpdatedAt
 	if start {
 		for _, other := range s.jobs {
 			if other.Attempt.State == "UNKNOWN" {
@@ -367,7 +370,11 @@ func (s *Server) transition(w http.ResponseWriter, r *http.Request, start bool) 
 		}
 		job.Attempt.State = body.State
 	}
+	if job.Attempt.State != previousState {
+		job.UpdatedAt = time.Now().Unix()
+	}
 	if err := s.save(); err != nil {
+		job.UpdatedAt = previousUpdated
 		job.Attempt.State = previousState
 		http.Error(w, "journal unavailable", 500)
 		return

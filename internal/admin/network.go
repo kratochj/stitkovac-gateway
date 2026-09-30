@@ -14,6 +14,8 @@ func networkMessage(code string) string {
 		return ""
 	case "saved":
 		return "Změna probíhá. Při přepnutí Wi-Fi se toto spojení může přerušit. Za 90 sekund obnovte stránku na původní síti nebo servisním AP."
+	case "admin_saved":
+		return "Nastavení přístupu přes Wi-Fi bylo uloženo. Vypnutí ukončí přístup přes Wi-Fi; přes kabel zůstává administrace dostupná."
 	case "done":
 		return "Požadavek byl zpracován. Výsledek najdete ve stavu připojení níže."
 	case "busy":
@@ -74,6 +76,9 @@ func (s *Server) renderNetwork(w http.ResponseWriter, r *http.Request, v session
 		status, err := s.Network.Status(r.Context())
 		if err == nil {
 			data["Network"] = status
+			if address := status.WiFiAdminAddress(); address != "" {
+				data["WiFiURL"] = "https://" + address
+			}
 			if prefix, e := netip.ParsePrefix(status.APAddress); e == nil {
 				data["APURL"] = "https://" + netip.AddrPortFrom(prefix.Addr(), 8443).String()
 			}
@@ -82,6 +87,9 @@ func (s *Server) renderNetwork(w http.ResponseWriter, r *http.Request, v session
 		}
 	} else {
 		data["Unavailable"] = true
+	}
+	if message == "" && r.URL.Query().Get("admin_saved") == "1" {
+		data["Message"] = "admin_saved"
 	}
 	if message == "" && r.URL.Query().Get("saved") == "1" {
 		data["Message"] = "saved"
@@ -124,6 +132,12 @@ func (s *Server) configureNetwork(w http.ResponseWriter, r *http.Request) {
 			target = s.Cloud.Status().URL
 		}
 		err = s.Network.Apply(r.Context(), network.WiFiRequest{SSID: r.Form.Get("ssid"), Password: r.Form.Get("password"), Security: r.Form.Get("security"), Hidden: r.Form.Get("hidden") == "1", Country: r.Form.Get("country"), ServerURL: target})
+	case "wifi-admin":
+		if r.Form.Get("enabled") != "0" && r.Form.Get("enabled") != "1" {
+			err = network.ErrInvalid
+		} else {
+			err = s.Network.SetWiFiAdmin(r.Context(), r.Form.Get("enabled") == "1")
+		}
 	case "ap":
 		err = s.Network.ServiceAP(r.Context(), true)
 	case "uplink":
@@ -133,7 +147,11 @@ func (s *Server) configureNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err == nil {
-		http.Redirect(w, r, "/network?saved=1", 303)
+		target := "/network?saved=1"
+		if r.PathValue("action") == "wifi-admin" {
+			target = "/network?admin_saved=1"
+		}
+		http.Redirect(w, r, target, 303)
 		return
 	}
 	code := "unavailable"

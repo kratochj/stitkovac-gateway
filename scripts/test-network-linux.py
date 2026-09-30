@@ -63,7 +63,9 @@ def start():
 
 process = start()
 try:
-    wait_mode("ap")
+    status = wait_mode("ap")
+    assert status["wifiAdminSupported"] and not status["wifiAdminEnabled"]
+    assert request("POST", "/wifi-admin", {"enabled": True})[0] == 200
     # The web UID may use the socket, but another UID in the same group may not.
     for uid, expected in ((1000, 200), (1001, 403)):
         child = os.fork()
@@ -111,6 +113,9 @@ try:
     process.wait(timeout=5)
     process = start()
     status = wait_mode("uplink")
+    assert status["wifiAdminEnabled"], "Wi-Fi administration preference lost on helper restart"
+    assert request("POST", "/wifi-admin", {"enabled": False})[0] == 200
+    assert not json.loads(request("GET", "/status")[1])["wifiAdminEnabled"]
     assert status["ssid"] == "Shop ; \\ 1;2;" and status["error"] == "interrupted"
     print("Linux helper: UID boundary, NM keyfile round-trip and process-kill recovery passed.")
 finally:
