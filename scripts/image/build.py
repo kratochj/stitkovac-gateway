@@ -5,16 +5,31 @@ Linux ARM64 + root required. All partition writes target a newly created regular
 output file through its own loop device; physical disks are never accepted.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
 import shutil
+import stat
 import subprocess
 import tempfile
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+@contextmanager
+def image_mounts(mounted):
+    root = Path(tempfile.mkdtemp(prefix='gateway-image-'))
+    try:
+        yield root
+    finally:
+        # Never recursively delete a directory containing mounted guest/host filesystems.
+        for target in reversed(mounted):
+            run('umount', str(target))
+        mounted.clear()
+        root.rmdir()
 
 
 def run(*args, **kwargs):
@@ -23,6 +38,19 @@ def run(*args, **kwargs):
 
 def output(*args):
     return subprocess.check_output(args, text=True).strip()
+
+
+def partition_device(loop, number):
+    path = Path(loop + 'p' + str(number))
+    # Containers have no udev daemon; use the kernel's exact partition device ID.
+    major, minor = map(int, (Path('/sys/class/block') / path.name / 'dev').read_text().split(':'))
+    device = os.makedev(major, minor)
+    if not path.exists():
+        os.mknod(path, stat.S_IFBLK | 0o600, device)
+    info = path.stat()
+    if not stat.S_ISBLK(info.st_mode) or info.st_rdev != device:
+        raise ValueError('Unexpected partition device: ' + str(path))
+    return str(path)
 
 
 def validate(source, destination, checksum):
@@ -42,11 +70,19 @@ def main():
     p.add_argument('--sha256', required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--validate-only', action='store_true')
+    p.add_argument('--release', type=Path, help='Signed release directory containing gateway, manifest.json and public-keys.json')
     args = p.parse_args()
     validate(args.base, args.output, args.sha256)
     for name in ('gateway', 'gateway-launcher', 'gateway-update', 'gateway-network'):
         if not (REPO / f'bin/{name}-linux-arm64').is_file():
             raise ValueError('Build all four ARM64 tools first')
+    if args.release:
+        for name in ('gateway', 'manifest.json', 'public-keys.json'):
+            path = args.release / name
+            if path.is_symlink() or not path.is_file():
+                raise ValueError('Missing regular signed release input: ' + name)
+        if (args.release / 'gateway').read_bytes() != (REPO / 'bin/gateway-linux-arm64').read_bytes():
+            raise ValueError('Signed release must match the bundled gateway binary')
     if args.validate_only:
         print('Base checksum, output path and binaries verified; no image written.')
         return
@@ -75,12 +111,14 @@ def main():
         layout = f"label: dos\nlabel-id: {table['id']}\nunit: sectors\n\nstart={parts[0]['start']}, size={parts[0]['size']}, type={parts[0]['type']}{boot_flag}\nstart={parts[1]['start']}, size={root_size}, type=83\nstart={data_start}, size={data_size}, type=83\n"
         run('sfdisk', str(args.output), input=layout, text=True, stdout=subprocess.DEVNULL)
         loop = output('losetup', '--find', '--show', '--partscan', str(args.output))
+        for number in (1, 2, 3):
+            partition_device(loop, number)
         check = subprocess.run(['e2fsck', '-pf', loop + 'p2'], stdout=subprocess.DEVNULL)
         if check.returncode not in (0, 1):
             raise ValueError('Base root filesystem failed its check')
         run('resize2fs', loop + 'p2', stdout=subprocess.DEVNULL)
         run('mkfs.ext4', '-q', '-L', 'GWDATA', loop + 'p3')
-        with tempfile.TemporaryDirectory(prefix='gateway-image-') as temp:
+        with image_mounts(mounted) as temp:
             root = Path(temp)
             def mount(device, target, *options):
                 target.mkdir(parents=True, exist_ok=True)
@@ -100,7 +138,7 @@ def main():
             resolver.write_text(Path('/etc/resolv.conf').read_text())
             run('chroot', str(root), 'apt-get', 'update')
             run('chroot', str(root), 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y', '--no-install-recommends',
-                'ansible-core', 'network-manager', 'iw', 'dnsmasq-base', 'nftables', 'openssh-server', 'sudo', 'python3', 'util-linux')
+                'ansible-core', 'network-manager', 'iw', 'rfkill', 'dnsmasq-base', 'nftables', 'openssh-server', 'sudo', 'python3', 'util-linux')
             run('chroot', str(root), 'apt-get', 'clean')
             bundle = root / 'usr/lib/stitkovac-image'
             shutil.copytree(REPO / 'deploy/ansible', bundle / 'deploy/ansible')
@@ -108,6 +146,18 @@ def main():
             (bundle / 'bin').mkdir()
             for name in ('gateway', 'gateway-launcher', 'gateway-update', 'gateway-network'):
                 shutil.copy2(REPO / f'bin/{name}-linux-arm64', bundle / f'bin/{name}-linux-arm64')
+            if args.release:
+                (bundle / 'release').mkdir()
+                for name in ('gateway', 'manifest.json', 'public-keys.json'):
+                    shutil.copy2(args.release / name, bundle / 'release' / name)
+                # Verify the signature and artifact before putting them into a distributable image.
+                (root / 'tmp/gateway-release-check').mkdir(mode=0o700)
+                run('chroot', str(root), '/usr/lib/stitkovac-image/bin/gateway-update-linux-arm64',
+                    'stage', '--releases', '/tmp/gateway-release-check',
+                    '--keys', '/usr/lib/stitkovac-image/release/public-keys.json',
+                    '--manifest', '/usr/lib/stitkovac-image/release/manifest.json',
+                    '--artifact', '/usr/lib/stitkovac-image/release/gateway')
+                shutil.rmtree(root / 'tmp/gateway-release-check')
             shutil.copy2(REPO / 'deploy/image/firstboot.py', bundle / 'firstboot.py')
             (bundle / 'firstboot.py').chmod(0o755)
             (bundle / 'inventory.yml').write_text('gateways:\n  hosts:\n    localhost:\n      ansible_connection: local\n')
@@ -115,12 +165,29 @@ def main():
             run('chroot', str(root), 'systemctl', 'enable', 'stitkovac-firstboot.service')
             for unit in ('ssh.service', 'ssh.socket', 'apt-daily.timer', 'apt-daily-upgrade.timer', 'dphys-swapfile.service', 'resize2fs_once.service', 'userconfig.service'):
                 run('chroot', str(root), 'systemctl', 'mask', unit)
+            # The appliance owns provisioning and partitioning, including on cloud-init vendor images.
+            (root / 'etc/cloud').mkdir(exist_ok=True)
+            (root / 'etc/cloud/cloud-init.disabled').touch()
+            for unit in ('cloud-init-local.service', 'cloud-init-network.service', 'cloud-init.service',
+                         'cloud-config.service', 'cloud-final.service', 'rpi-resize.service',
+                         'rpi-first-boot.service', 'systemd-firstboot.service',
+                         'systemd-growfs-root.service', 'rpi-eeprom-update.service',
+                         'regenerate_ssh_host_keys.service'):
+                run('chroot', str(root), 'systemctl', 'mask', unit)
+            # Trixie defaults to zram with an SD-backed overflow file. Keep swap entirely in RAM.
+            (root / 'etc/rpi').mkdir(exist_ok=True)
+            (root / 'etc/rpi/swap.conf').write_text('[Main]\nMechanism=zram\n[Zram]\nFixedSizeMiB=256\n')
+            (root / 'var/swap').unlink(missing_ok=True)
             # SSH is enabled only after unique keys and access policy exist.
             run('chroot', str(root), 'systemctl', 'unmask', 'ssh.service')
             run('chroot', str(root), 'systemctl', 'disable', 'ssh.service')
             boot = root / 'boot/firmware'
+            (boot / 'gateway-image.json').write_text(json.dumps({
+                'product': 'stitkovac-gateway', 'architecture': 'arm64', 'personalized': False,
+                'baseSha256': args.sha256,
+            }, indent=2) + '\n')
             command_line = (boot / 'cmdline.txt').read_text().split()
-            (boot / 'cmdline.txt').write_text(' '.join(x for x in command_line if not x.startswith(('init=', 'systemd.run=', 'systemd.run_success_action=', 'systemd.unit='))) + '\n')
+            (boot / 'cmdline.txt').write_text(' '.join(x for x in command_line if x != 'resize' and not x.startswith(('init=', 'systemd.run=', 'systemd.run_success_action=', 'systemd.unit='))) + '\n')
             with (root / 'etc/fstab').open('a') as f:
                 f.write('\nLABEL=GWDATA /data ext4 defaults,noatime 0 2\n')
             (root / 'data').mkdir(exist_ok=True)
@@ -132,6 +199,9 @@ def main():
             for seed in ('var/lib/systemd/random-seed', 'boot/firmware/random-seed'):
                 (root / seed).unlink(missing_ok=True)
             policy.unlink()
+            # The build host's resolver is only for APT; do not ship its private DNS configuration.
+            resolver.unlink()
+            resolver.symlink_to('/run/NetworkManager/resolv.conf')
             # Unmount inside the temporary directory lifetime.
             for target in reversed(mounted):
                 run('umount', str(target))

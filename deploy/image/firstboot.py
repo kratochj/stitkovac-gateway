@@ -1,14 +1,26 @@
 #!/usr/bin/python3
 """Per-device initialization. Generic images contain no identities or credentials."""
+import base64
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
+import traceback
 
 
 def run(*args):
-    subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with tempfile.TemporaryFile(dir='/run') as log:
+        result = subprocess.run(args, stdout=log, stderr=log)
+        if result.returncode:
+            # Ansible secret-bearing tasks use no_log. Retain bounded details for local root only.
+            log.seek(0, os.SEEK_END)
+            length = log.tell()
+            log.seek(max(0, length - 65536))
+            if Path('/data/gateway-bootstrap.json').exists():
+                write('/data/gateway-bootstrap-error.log', log.read().decode('utf-8', errors='replace'))
+            raise RuntimeError('Provisioning command failed')
 
 
 def write(path, value, mode=0o600):
@@ -50,6 +62,7 @@ def main():
             os.sync()
             run('mount', '-o', 'remount,ro', '/boot/firmware')
         Path('/data/gateway-bootstrap.json').unlink(missing_ok=True)
+        Path('/data/gateway-bootstrap-error.log').unlink(missing_ok=True)
         return
     run('mountpoint', '-q', '/data')
     run('mount', '-o', 'remount,rw', '/')
@@ -62,12 +75,23 @@ def main():
     # The secret is never passed in argv or left in a log.
     variables = {'gateway_admin_password': seed['admin_password'], 'gateway_country': seed['country'],
                  'gateway_network_provision': True, 'gateway_install_network_packages': False}
+    release = Path('/usr/lib/stitkovac-image/release')
+    if release.exists():
+        envelope = json.loads((release / 'manifest.json').read_text())
+        payload = json.loads(base64.b64decode(envelope['payload'], validate=True))
+        variables.update(gateway_ota_provision=True, gateway_release_version=payload['version'],
+                         gateway_release_manifest=str(release / 'manifest.json'),
+                         gateway_release_artifact=str(release / 'gateway'),
+                         gateway_release_keys=str(release / 'public-keys.json'))
     write('/run/gateway-bootstrap-vars.json', json.dumps(variables))
     try:
         run('ansible-playbook', '-i', '/usr/lib/stitkovac-image/inventory.yml',
             '/usr/lib/stitkovac-image/deploy/ansible/bootstrap.yml', '-e', '@/run/gateway-bootstrap-vars.json')
         run('ansible-playbook', '-i', '/usr/lib/stitkovac-image/inventory.yml',
             '/usr/lib/stitkovac-image/deploy/ansible/network.yml', '-e', '@/run/gateway-bootstrap-vars.json')
+        if release.exists():
+            run('ansible-playbook', '-i', '/usr/lib/stitkovac-image/inventory.yml',
+                '/usr/lib/stitkovac-image/deploy/ansible/ota.yml', '-e', '@/run/gateway-bootstrap-vars.json')
     finally:
         Path('/run/gateway-bootstrap-vars.json').unlink(missing_ok=True)
     Path('/data/access').mkdir(exist_ok=True, mode=0o755)
@@ -82,6 +106,13 @@ def main():
     if not host.exists():
         run('ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(host))
     write('/etc/ssh/sshd_config.d/00-gateway.conf', 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\nAllowUsers technik\nAuthorizedKeysFile /data/access/authorized_keys\nHostKey /data/ssh/ssh_host_ed25519_key\n', 0o644)
+    # Raspberry Pi OS may ship Wi-Fi soft-blocked until its country is configured.
+    write('/etc/modprobe.d/gateway-country.conf', 'options cfg80211 ieee80211_regdom=' + seed['country'] + '\n', 0o644)
+    write('/etc/systemd/system/stitkovac-wifi-radio.service',
+          '[Unit]\nDescription=Enable the provisioned gateway Wi-Fi radio\nAfter=systemd-rfkill.service\nBefore=NetworkManager.service\n'
+          '[Service]\nType=oneshot\nExecStart=/usr/sbin/rfkill unblock wifi\nRemainAfterExit=yes\n'
+          '[Install]\nWantedBy=multi-user.target\n', 0o644)
+    run('systemctl', 'enable', 'stitkovac-wifi-radio.service')
     # A failed/retried first boot never replaces persistent OS identities.
     if not Path('/data/machine-id').exists():
         write('/data/machine-id', Path('/etc/machine-id').read_text(), 0o444)
@@ -109,6 +140,7 @@ def main():
     run('systemctl', 'enable', 'stitkovac-gateway.service', 'ssh.service')
     os.sync()
     write('/data/gateway-image-ready', '1\n')
+    Path('/data/gateway-bootstrap-error.log').unlink(missing_ok=True)
     Path('/boot/firmware/gateway-provision.json').unlink(missing_ok=True)
     seed_path.unlink()
     os.sync()
@@ -118,6 +150,8 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except Exception:
+    except Exception as error:
         # Do not expose Ansible output or provisioning secrets to the journal.
-        raise SystemExit('Gateway initialization failed; inspect provisioning input and storage from the local console.')
+        location = ', '.join(Path(frame.filename).name + ':' + str(frame.lineno)
+                             for frame in traceback.extract_tb(error.__traceback__) if frame.filename == __file__)
+        raise SystemExit('Gateway initialization failed at ' + location + '; inspect provisioning input and root-only /data/gateway-bootstrap-error.log from the local console.')

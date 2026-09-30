@@ -72,14 +72,19 @@
       ansible.builtin.assert:
         that: gateway_active.stdout | trim != 'active'
 
-    - name: Inspect existing network services
-      ansible.builtin.service_facts:
+    - name: Inspect whether the network controller unit is installed
+      ansible.builtin.command:
+        argv: [systemctl, show, stitkovac-gateway-network.service, --property=LoadState, --value]
+      register: gateway_network_unit
+      changed_when: false
+      failed_when: false
+      check_mode: false
 
     - name: Stop the existing controller during offline provisioning
       ansible.builtin.systemd_service:
         name: stitkovac-gateway-network
         state: stopped
-      when: "'stitkovac-gateway-network.service' in ansible_facts.services"
+      when: gateway_network_unit.stdout | trim in ['loaded', 'masked']
 
     - name: Inspect persistent storage
       ansible.builtin.command:
@@ -407,7 +412,7 @@
         enabled: false
         masked: true
       loop: [dhcpcd.service, systemd-networkd.service, dphys-swapfile.service]
-      when: item in ansible_facts.services
+      when: item in ansible_facts.services and ansible_facts.services[item].status != 'not-found'
 
     - name: Enable provisioned services for next boot without disrupting provisioning
       ansible.builtin.systemd_service:
