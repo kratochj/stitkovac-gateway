@@ -365,6 +365,9 @@ func run(args []string) (runErr error) {
 			return err
 		}
 		server.TLSConfig.Certificates = []tls.Certificate{certificate}
+		wifiStopped := make(chan struct{})
+		go func() { defer close(wifiStopped); web.ServeWiFi(ctx, server.TLSConfig) }()
+		defer func() { stop(); <-wifiStopped }()
 		plainListener, err := platform.ListenFreebind(ctx, *adminAddress)
 		if err != nil {
 			return err

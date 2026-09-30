@@ -33,7 +33,8 @@ func (n *networkStub) Apply(_ context.Context, r network.WiFiRequest) error {
 	}
 	return nil
 }
-func (n *networkStub) ServiceAP(context.Context, bool) error { return nil }
+func (n *networkStub) SetWiFiAdmin(context.Context, bool) error { return nil }
+func (n *networkStub) ServiceAP(context.Context, bool) error    { return nil }
 func TestNetworkFormsAuthOriginCSRFAndSecrets(t *testing.T) {
 	store, err := state.Initialize(t.TempDir()+"/state", "hash")
 	if err != nil {

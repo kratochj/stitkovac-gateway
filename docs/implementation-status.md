@@ -1,12 +1,23 @@
 # Stav implementace
 
-Aktualizováno 2026-09-29. Serverová podpora bran je vydaná a nasazená v **2.7.13**
+Aktualizováno 2026-09-30. Serverová podpora bran je vydaná a nasazená v **2.7.13**
 na `cloud.stitkovac.app`. Agent má lokální administraci, cloudový transport
 a dokončenou softwarovou implementaci aplikačního OTA. Serverová OTA část je
 nasazená v produkci s veřejným klíčem testovací brány. Nejde zatím o dokončenou
 zákaznickou instalaci.
 Gateway má vzdálený repozitář `kratochj/stitkovac-gateway`. Správa tiskáren a provozní
 dokončení jsou připravené v pracovních větvích; dosud nejsou nasazené.
+
+## Fyzický pilot Pi 3 B+
+
+Uživatel potvrdil první start image 0.1.8, připojení k Wi-Fi a tisk několika
+štítků na skutečné tiskárně. Dne 30. 9. byl na tomto Pi přes Ethernet nasazen
+servisní upgrade **0.1.9** pro [administraci přes zákaznickou Wi-Fi](wifi-admin.md).
+Launcher potvrdil aktivní 0.1.9 bez trialu; agent, pomocník a firewall běží,
+root i boot zůstaly read-only a storage guard prošel. Uživatel následně zapnul
+přístup přes zákaznickou Wi-Fi a potvrdil jeho funkčnost. Nejde o plošné nasazení
+ani publikaci tohoto vydání na server. Ověření servisního AP a opakovaných
+výpadků napájení na hardware zůstává samostatným krokem.
 
 ## Hotový základ
 
@@ -16,7 +27,7 @@ dokončení jsou připravené v pracovních větvích; dosud nejsou nasazené.
 | Persistence | SQLite WAL/FULL, odmítnutí chybějícího úložiště, obnova po ukončení procesu bez cleanupu |
 | DHCP | MAC rezervace před OFFER, lease před ACK, RELEASE bez ztráty rezervace, DECLINE karanténa |
 | Servisní web | HTTPS login/logout, CSRF/Origin/Host ochrany, limit přihlašování, přehled rezervací, nastavení adresy serveru a tokenu, stav WSS připojení |
-| Síťová administrace | Root NetworkManager helper, Wi-Fi s rollbackem, servisní AP, GPIO, trvalé profily, oddělené DHCP a firewall provisioning; software ověřen, rádiová část čeká na RPi pilot |
+| Síťová administrace | Root NetworkManager helper, Wi-Fi s rollbackem, servisní AP, GPIO, trvalé profily, oddělené DHCP a firewall provisioning; software ověřen, Wi-Fi uplink a Ethernet fungují na pilotním Pi; servisní AP čeká na hardwarové ověření |
 | Diagnostika tisku | Historie po 50 pokusech, filtr stavu, časy a potvrzení serverem, upozornění na UNKNOWN, TCP test aktivní rezervace bez odeslání dat a bez souběhu s tiskem |
 | Cloud | WSS handshake, heartbeat, reconnect, událostmi spouštěná synchronizace, HTTPS transport bez redirectů |
 | Tisk | Ověření checksumu, journal před TCP zápisem, max. čtyři endpointy, detekce nejistého výsledku |
@@ -45,8 +56,10 @@ je aktualizovaná při zachování nastaveného serveru a tokenu.
    výměna tiskárny a audit. [Kontrakt a ověření](printer-operations.md).
 3. **Provozní dokončení – implementováno, nenasazeno:** retence dokumentů/historie
    s trvalými tombstones, změny servisních přístupů, panic recovery s původním
-   stackem a [builder kompletního OS image](os-image.md). Konkrétní obraz a fyzický
-   první boot zůstávají hardwarovým ověřením, nikoli provedeným nasazením.
+   stackem a [kompletní OS image 0.1.8 pro Pi 3 B+](os-image.md). Provisioning,
+   inicializace podepsaného OTA a read-only druhý boot prošly v QEMU s 1 GB RAM.
+   Fyzický první boot, Wi-Fi uplink a tisk na pilotním Pi už potvrdil uživatel;
+   servisní AP a opakované výpadky napájení zůstávají k ověření.
 4. **Pilot:** produkční end-to-end tisk, samostatný Rollbar projekt/token,
    kompatibilita nainstalovaných klientů, mezirepliková latence, PC42E,
    MAC/IP conflict detection, DHCP interoperabilita,

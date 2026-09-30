@@ -27,7 +27,7 @@ Chyby se hlásí do Rollbaru přes server Štítkovače.
 - Verzovaná synchronizace DHCP se serverem, registrace tiskáren po lease, servis konfliktů a výměny.
 - Ruční uzavření nejistého tisku, retence dokumentů a historie s trvalou deduplikací.
 - Změny servisních přístupů a panic recovery s původním místem chyby.
-- Builder obecného OS image a per-device bootstrap; hardwarové ověření dosud neproběhlo.
+- Sestavený OS image 0.1.8 pro RPi 3 B+, per-device bootstrap a ověřený read-only druhý boot v QEMU; fyzické hardwarové ověření dosud neproběhlo.
 - HTTPS servisní přihlášení s Argon2id a přehled nalezených zařízení.
 - Nastavení serveru a tokenu ve webu, trvalé uložení a přepnutí WSS spojení bez restartu.
 - Síťová administrace: Wi-Fi s rollbackem, servisní AP, GPIO a trvalé profily přes root helper.
@@ -73,3 +73,6 @@ Další informace:
 - [Instalace a bezpečný pilot](docs/installation.md).
 - [Gateway API v1](docs/protocol-v1.md).
 - [Rozhodnutí o DHCP backendu](docs/adr-001-dhcp.md).
+
+Administrace přes zákaznickou Wi-Fi a jednorázový upgrade staršího image:
+[postup servisní aktualizace](docs/wifi-admin.md).

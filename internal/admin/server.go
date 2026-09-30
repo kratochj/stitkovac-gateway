@@ -38,6 +38,7 @@ type Server struct {
 		Scan(context.Context) ([]network.AccessPoint, error)
 		Apply(context.Context, network.WiFiRequest) error
 		ServiceAP(context.Context, bool) error
+		SetWiFiAdmin(context.Context, bool) error
 	}
 	AdditionalHost string
 	Store          *state.Store
@@ -87,7 +88,8 @@ func (s *Server) Handler() http.Handler {
 		// no-referrer makes browser form POSTs send Origin: null, including our own login.
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
-		if r.Host != s.Host && (s.AdditionalHost == "" || r.Host != s.AdditionalHost) {
+		wifiHost, _ := r.Context().Value(wifiHostKey{}).(string)
+		if r.Host != s.Host && (s.AdditionalHost == "" || r.Host != s.AdditionalHost) && (wifiHost == "" || r.Host != wifiHost) {
 			http.Error(w, "Neplatná adresa brány.", http.StatusMisdirectedRequest)
 			return
 		}

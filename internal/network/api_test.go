@@ -21,6 +21,12 @@ func TestHelperPeerAuthorizationAndStrictRequests(t *testing.T) {
 		{999, "GET", "/status", "", 403}, {1000, "GET", "/status", "", 200}, {0, "GET", "/status", "", 200},
 		{1000, "POST", "/wifi", `{"ssid":"x","command":"rm"}`, 400}, {1000, "POST", "/wifi", `{} {}`, 400},
 		{1000, "POST", "/arbitrary", "", 404},
+		{999, "POST", "/wifi-admin", `{"enabled":true}`, 403},
+		{1000, "POST", "/wifi-admin", `{}`, 400},
+		{1000, "POST", "/wifi-admin", `{"enabled":true,"command":"x"}`, 400},
+		{1000, "POST", "/wifi-admin", `{"enabled":true} {}`, 400},
+		{1000, "POST", "/wifi-admin", `{"enabled":true}`, 200},
+		{1000, "POST", "/wifi-admin", `{"enabled":false}`, 200},
 	}
 	for _, tt := range cases {
 		r := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
