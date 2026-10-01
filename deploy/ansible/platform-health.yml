@@ -1,0 +1,79 @@
+---
+- name: Install platform recovery on an existing appliance during offline maintenance
+  hosts: gateways
+  become: true
+  gather_facts: false
+  vars:
+    ansible_remote_tmp: /tmp/ansible-gateway-service
+  tasks:
+    - name: Require explicit maintenance and matching trusted binary inputs
+      ansible.builtin.assert:
+        that:
+          - gateway_platform_maintenance | default(false) | bool
+          - gateway_launcher_binary is defined
+          - gateway_update_binary is defined
+          - not ansible_check_mode
+        fail_msg: Stop printing and both gateway services, then supply the trusted binaries matching the installed platform and gateway_platform_maintenance=true.
+
+    - name: Require the read-only appliance layout
+      ansible.builtin.command: /usr/lib/stitkovac-gateway/check-storage
+      changed_when: false
+
+    - name: Read service states
+      ansible.builtin.command:
+        argv: [systemctl, show, "{{ item }}", --property=ActiveState, --value]
+      loop: [stitkovac-gateway.service, stitkovac-gateway-network.service]
+      register: platform_services
+      changed_when: false
+
+    - name: Require stopped services
+      ansible.builtin.assert:
+        that: item.stdout | trim in ['inactive', 'failed']
+      loop: "{{ platform_services.results }}"
+
+    - name: Hash installed platform binaries
+      ansible.builtin.stat:
+        path: "/usr/lib/stitkovac-gateway/{{ item }}"
+        checksum_algorithm: sha256
+      loop: [gateway-launcher, gateway-update]
+      register: platform_installed
+
+    - name: Hash proposed trusted copies
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      loop: ["{{ gateway_launcher_binary }}", "{{ gateway_update_binary }}"]
+      register: platform_proposed
+
+    - name: Refuse an implicit platform upgrade or unknown installed corruption
+      ansible.builtin.assert:
+        that:
+          - platform_installed.results[0].stat.checksum == platform_proposed.results[0].stat.checksum
+          - platform_installed.results[1].stat.checksum == platform_proposed.results[1].stat.checksum
+
+    - name: Install guards without changing application selection
+      block:
+        - name: Unlock root for maintenance
+          ansible.builtin.command: mount -o remount,rw /
+          changed_when: true
+        - name: Install integrity guard and diagnostics
+          ansible.builtin.import_tasks: tasks/platform-health.yml
+      always:
+        - name: Restore read-only root even after installation failure
+          ansible.builtin.command: mount -o remount,ro /
+          changed_when: true
+
+    - name: Validate installed guard on read-only storage
+      ansible.builtin.command: /usr/lib/stitkovac-gateway/platform-health check
+      changed_when: false
+
+    - name: Start periodic diagnostics
+      ansible.builtin.systemd_service:
+        name: stitkovac-gateway-diagnostics.timer
+        state: started
+
+    - name: Report maintenance completion
+      ansible.builtin.debug:
+        msg: Platform integrity validated. Restart the network helper and gateway after maintenance; application selection and credentials were not changed.

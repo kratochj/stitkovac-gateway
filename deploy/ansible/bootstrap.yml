@@ -104,6 +104,9 @@
         group: root
         mode: '0755'
 
+    - name: Install platform integrity and persistent diagnostics
+      ansible.builtin.import_tasks: tasks/platform-health.yml
+
     - name: Inspect initialized state
       ansible.builtin.stat:
         path: /data/gateway/gateway.db

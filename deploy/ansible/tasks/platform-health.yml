@@ -1,0 +1,84 @@
+---
+# The caller must have stopped the agent and made root writable for maintenance.
+- name: Hash trusted platform inputs on the controller
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  loop:
+    - "{{ gateway_launcher_binary }}"
+    - "{{ gateway_update_binary }}"
+  register: platform_inputs
+
+- name: Create root-owned recovery storage
+  ansible.builtin.file:
+    path: /usr/lib/stitkovac-gateway/recovery
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install matching immutable recovery copies
+  ansible.builtin.copy:
+    src: "{{ item.item }}"
+    dest: "/usr/lib/stitkovac-gateway/recovery/{{ item.stat.checksum }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ platform_inputs.results }}"
+
+- name: Publish expected hashes only after both copies are installed
+  ansible.builtin.copy:
+    dest: /usr/lib/stitkovac-gateway/recovery.json
+    owner: root
+    group: root
+    mode: '0644'
+    content: "{{ {'gateway-launcher': platform_inputs.results[0].stat.checksum, 'gateway-update': platform_inputs.results[1].stat.checksum} | to_nice_json }}\n"
+
+- name: Install platform health guard
+  ansible.builtin.copy:
+    src: ../systemd/platform-health
+    dest: /usr/lib/stitkovac-gateway/platform-health
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create private persistent diagnostics directory
+  ansible.builtin.file:
+    path: /data/gateway-diagnostics
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install periodic diagnostic units
+  ansible.builtin.copy:
+    src: "../systemd/{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - stitkovac-gateway-diagnostics.service
+    - stitkovac-gateway-diagnostics.timer
+
+- name: Create service override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/stitkovac-gateway.service.d
+    state: directory
+    mode: '0755'
+
+- name: Check platform binaries before every start and capture every stop
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/stitkovac-gateway.service.d/platform-health.conf
+    owner: root
+    group: root
+    mode: '0644'
+    src: ../systemd/platform-health.conf
+
+- name: Enable bounded diagnostics without starting the agent during maintenance
+  ansible.builtin.systemd_service:
+    name: stitkovac-gateway-diagnostics.timer
+    enabled: true
+    daemon_reload: true

@@ -20,6 +20,27 @@ install -m 644 deploy/systemd/stitkovac-gateway-network.service "$stage/lib/syst
 install -m 755 bin/gateway-update-linux-arm64 "$stage/usr/lib/stitkovac-gateway/gateway-update"
 install -m 755 deploy/systemd/check-storage "$stage/usr/lib/stitkovac-gateway/check-storage"
 install -m 644 deploy/systemd/stitkovac-gateway.service "$stage/lib/systemd/system/stitkovac-gateway.service"
+install -m 755 deploy/systemd/platform-health "$stage/usr/lib/stitkovac-gateway/platform-health"
+mkdir -p "$stage/lib/systemd/system/stitkovac-gateway.service.d"
+install -m 644 deploy/systemd/platform-health.conf "$stage/lib/systemd/system/stitkovac-gateway.service.d/platform-health.conf"
+for unit in stitkovac-gateway-diagnostics.service stitkovac-gateway-diagnostics.timer; do
+  install -m 644 "deploy/systemd/$unit" "$stage/lib/systemd/system/$unit"
+done
+python3 - "$stage/usr/lib/stitkovac-gateway" <<'PYTHON'
+import hashlib
+import json
+from pathlib import Path
+import sys
+base = Path(sys.argv[1])
+(base / 'recovery').mkdir()
+manifest = {}
+for name in ('gateway-launcher', 'gateway-update'):
+    content = (base / name).read_bytes()
+    checksum = hashlib.sha256(content).hexdigest()
+    (base / 'recovery' / checksum).write_bytes(content)
+    manifest[name] = checksum
+(base / 'recovery.json').write_text(json.dumps(manifest) + '\n')
+PYTHON
 cat > "$stage/DEBIAN/control" <<EOF
 Package: stitkovac-gateway
 Version: $version

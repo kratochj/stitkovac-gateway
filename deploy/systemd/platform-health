@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""Verify platform executables and retain bounded, secret-free incident evidence."""
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+BASE = Path('/usr/lib/stitkovac-gateway')
+RECORDS = Path('/data/gateway-diagnostics/events.json')
+NAMES = ('gateway-launcher', 'gateway-update')
+LIMIT = 128
+MAX_LOG_BYTES = 256 * 1024
+ERROR_REASONS = {
+    'untrusted recovery file metadata', 'oversized recovery manifest',
+    'invalid recovery manifest', 'oversized recovery copy',
+    'recovery copy checksum mismatch', 'recovery requires a read-only ext4 root',
+    'restored executable checksum mismatch', 'root remains writable after recovery',
+}
+
+
+def run(*args, timeout=20):
+    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=timeout).stdout
+
+
+def digest(path):
+    with path.open('rb') as stream:
+        value = hashlib.sha256()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            value.update(chunk)
+        return value.hexdigest()
+
+
+def atomic_write(path, content, mode):
+    fd, temporary = tempfile.mkstemp(prefix='.' + path.name + '-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            os.fchmod(stream.fileno(), mode)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def record(event, **fields):
+    data = json.loads(run('findmnt', '--json', '--target', '/data', '--output', 'TARGET,FSTYPE,FS-OPTIONS'))['filesystems'][0]
+    if data['target'] != '/data' or data['fstype'] != 'ext4' or 'rw' not in data['fs-options'].split(','):
+        raise ValueError('persistent diagnostic mount unavailable')
+    RECORDS.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    entries = {'events': [], 'snapshots': []}
+    try:
+        # Never load an unbounded or damaged previous log into memory.
+        if RECORDS.stat().st_size <= MAX_LOG_BYTES:
+            entries = json.loads(RECORDS.read_text())
+            if not isinstance(entries, dict) or set(entries) != {'events', 'snapshots'} or any(not isinstance(v, list) for v in entries.values()):
+                entries = {'events': [], 'snapshots': []}
+    except (OSError, ValueError):
+        pass
+    entry = {'event': event, 'unix_time': int(time.time()),
+             'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+             'uptime': Path('/proc/uptime').read_text().split()[0], **fields}
+    bucket = 'snapshots' if event == 'snapshot' else 'events'
+    entries[bucket].append(entry)
+    entries = {key: values[-(LIMIT if key == 'snapshots' else 32):] for key, values in entries.items()}
+    content = json.dumps(entries, separators=(',', ':')).encode()
+    if len(content) > MAX_LOG_BYTES:
+        entries = {'events': [], 'snapshots': []}
+        entries[bucket] = [entry]
+        content = json.dumps(entries, separators=(',', ':')).encode()
+    atomic_write(RECORDS, content, 0o600)
+
+
+def safe_record(event, **fields):
+    try:
+        record(event, **fields)
+    except (OSError, ValueError):
+        print('Persistent gateway diagnostic write failed', file=sys.stderr)
+
+
+def trusted_file(path):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise ValueError('untrusted recovery file metadata')
+
+
+def recover(base=BASE, remount=None):
+    if remount is None:
+        remount = lambda mode: run('mount', '-o', 'remount,' + mode, '/')
+    manifest = base / 'recovery.json'
+    trusted_file(manifest)
+    if manifest.stat().st_size > 4096:
+        raise ValueError('oversized recovery manifest')
+    expected = json.loads(manifest.read_text())
+    if set(expected) != set(NAMES) or any(not isinstance(v, str) or not re.fullmatch('[0-9a-f]{64}', v) for v in expected.values()):
+        raise ValueError('invalid recovery manifest')
+    damaged = []
+    replacements = {}
+    for name in NAMES:
+        target = base / name
+        try:
+            trusted_file(target)
+            actual = digest(target)
+        except (OSError, ValueError):
+            actual = 'missing-or-unsafe'
+        if actual != expected[name]:
+            damaged.append({'file': name, 'actual': actual, 'expected': expected[name]})
+            source = base / 'recovery' / expected[name]
+            trusted_file(source)
+            # Retain the exact verified bytes, avoiding a second unverified read.
+            if source.stat().st_size > 64 * 1024 * 1024:
+                raise ValueError('oversized recovery copy')
+            data = source.read_bytes()
+            if hashlib.sha256(data).hexdigest() != expected[name]:
+                raise ValueError('recovery copy checksum mismatch')
+            replacements[name] = data
+    if not replacements:
+        safe_record('integrity-ok')
+        return
+    safe_record('integrity-mismatch', files=damaged)
+    root = json.loads(run('findmnt', '--json', '--target', '/', '--output', 'FSTYPE,FS-OPTIONS'))['filesystems'][0]
+    if root['fstype'] != 'ext4' or 'ro' not in root['fs-options'].split(','):
+        raise ValueError('recovery requires a read-only ext4 root')
+    try:
+        remount('rw')
+        for name, data in replacements.items():
+            atomic_write(base / name, data, 0o755)
+            if digest(base / name) != expected[name]:
+                raise ValueError('restored executable checksum mismatch')
+    finally:
+        # This must also run after a failed write or remount attempt.
+        remount('ro')
+    root = json.loads(run('findmnt', '--json', '--target', '/', '--output', 'FSTYPE,FS-OPTIONS'))['filesystems'][0]
+    if 'ro' not in root['fs-options'].split(','):
+        raise ValueError('root remains writable after recovery')
+    safe_record('integrity-restored', files=list(replacements))
+
+
+def snapshot():
+    fields = {}
+    try:
+        output = run('systemctl', 'show', 'stitkovac-gateway.service',
+                     '--property=ActiveState,SubState,Result,ExecMainCode,ExecMainStatus,NRestarts', timeout=3)
+        allowed = {'ActiveState', 'SubState', 'Result', 'ExecMainCode', 'ExecMainStatus', 'NRestarts'}
+        fields['service'] = {key: value[:64] for line in output.splitlines() if '=' in line
+                             for key, value in [line.split('=', 1)] if key in allowed}
+    except (OSError, subprocess.SubprocessError):
+        fields['service_unavailable'] = True
+    # Store categories and counts, never arbitrary kernel/application messages.
+    patterns = {'undervoltage': r'under.?voltage', 'io_error': r'I/O error|Buffer I/O',
+                'filesystem_error': r'EXT4-fs (?:error|warning)',
+                'mmc_error': r'mmc.*(?:error|timeout|timed out)',
+                'oom': r'Out of memory|Killed process'}
+    try:
+        # A bounded tail limits both reads and retained evidence; counts are not totals.
+        output = run('journalctl', '-k', '-b', '-n', '200', '--no-pager', '-o', 'cat', timeout=3)
+        fields['kernel_tail_counts'] = {key: len(re.findall(pattern, output, re.I)) for key, pattern in patterns.items()}
+    except (OSError, subprocess.SubprocessError):
+        fields['kernel_unavailable'] = True
+    try:
+        throttle = run('vcgencmd', 'get_throttled', timeout=3).strip()
+        if re.fullmatch(r'throttled=0x[0-9a-fA-F]+', throttle):
+            fields['throttled'] = throttle.split('=')[1]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for name in ('SERVICE_RESULT', 'EXIT_CODE', 'EXIT_STATUS'):
+        value = os.environ.get(name, '')
+        if re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', value):
+            fields[name.lower()] = value
+    safe_record('snapshot', **fields)
+
+
+def main():
+    os.umask(0o077)
+    if len(sys.argv) != 2 or sys.argv[1] not in ('check', 'snapshot'):
+        raise ValueError('expected check or snapshot')
+    # Both the timer and service hooks share the same root-owned lock.
+    with open('/run/stitkovac-platform-health.lock', 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if sys.argv[1] == 'snapshot':
+            snapshot()
+            return
+        try:
+            # Validate data/boot/root mounts before writing diagnostics or recovery.
+            run(str(BASE / 'check-storage'))
+            recover()
+            snapshot()
+        except Exception as error:
+            # Exception text can contain untrusted input; retain only its class.
+            safe_record('integrity-failed', error_type=type(error).__name__,
+                        reason=str(error) if str(error) in ERROR_REASONS else 'platform-preflight')
+            snapshot()
+            raise
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        print('Gateway platform preflight failed: ' + type(error).__name__, file=sys.stderr)
+        sys.exit(1)

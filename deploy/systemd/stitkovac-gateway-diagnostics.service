@@ -1,0 +1,15 @@
+[Unit]
+Description=Retain bounded gateway diagnostic evidence
+RequiresMountsFor=/data
+ConditionPathExists=/data/gateway/gateway.db
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/stitkovac-gateway/platform-health snapshot
+UMask=0077
+TimeoutStartSec=90
+MemoryMax=96M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data /run

@@ -37,6 +37,7 @@ Chyby se hlásí do Rollbaru přes server Štítkovače.
 - Omezená trvalá fronta očištěných chyb pro serverový Rollbar relay.
 - Podepsané OTA přes WSS, dokončení tisku před aktivací, launcher s readiness a rollbackem.
 - Serverový rollout, servisní okna a audit; hosting podepsaných vydání, Ansible a podpisová CI.
+- Kontrola integrity launcheru a updateru před startem, obnova z ověřené kopie a omezená persistentní diagnostika.
 - ARM64 build, systemd služba, Ansible bootstrap/diagnostika a sestavení `.deb` na Linuxu.
 
 ## Vývoj
@@ -66,6 +67,7 @@ Další informace:
 - [Testovací VirtualBox build se simulovanou tiskárnou](docs/virtualbox-lab.md).
 - [Správa tiskáren a provozní dokončení](docs/printer-operations.md).
 - [Kompletní OS image](docs/os-image.md).
+- [Integrita platformy, obnova a persistentní diagnostika](docs/platform-integrity.md).
 - [Síťová administrace a provisioning](docs/network-administration.md).
 - [Historie a diagnostika tisku](docs/print-diagnostics.md).
 - [Stav implementace a zbývající práce](docs/implementation-status.md).

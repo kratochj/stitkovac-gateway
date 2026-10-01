@@ -48,6 +48,9 @@
     - {source: "{{ gateway_launcher_binary }}", name: gateway-launcher}
     - {source: "{{ gateway_update_binary }}", name: gateway-update}
 
+- name: Install matching platform recovery and diagnostics
+  ansible.builtin.import_tasks: platform-health.yml
+
 - name: Create private release storage
   ansible.builtin.file:
     path: /data/gateway-releases
