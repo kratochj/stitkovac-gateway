@@ -49,7 +49,7 @@ Samotné spojení jinou kartou tedy nemůže potvrdit nefunkční Wi-Fi.
 | `/data/network/selection.json` | Přijatý profil, případný pokus, režim AP a jeho termín |
 | `/data/network/profiles` | Privátní NetworkManager keyfiles |
 | `/data/network/nm-state` | Trvalý stav NetworkManageru |
-| `/data/network/ap-credentials.json` | Unikátní SSID, heslo a UUID servisního AP |
+| `/data/network/ap-credentials.json` | SSID odvozené z Wi-Fi MAC, náhodné heslo a UUID servisního AP |
 | `/etc/stitkovac-gateway/network.json` | Root konfigurace helperu, rozhraní, rozsahy a GPIO |
 
 Profily a journal se zapisují atomicky s fsync souboru i adresáře. Po restartu
@@ -176,3 +176,6 @@ Rozdělení SD a read-only nastavení konkrétního image zůstává samostatnou
 - [nmcli a jeho offline režim](https://networkmanager.pages.freedesktop.org/NetworkManager/NetworkManager/nmcli.html)
 - [Linux GPIO character device API](https://docs.kernel.org/userspace-api/gpio/chardev.html)
 - [GPIO v2 UAPI definice](https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/gpio.h)
+
+Hostname a SSID nových appliance image používají shodný formát podle Wi-Fi MAC;
+[pravidla a servisní přejmenování](device-naming.md).

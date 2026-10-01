@@ -138,7 +138,7 @@ def main():
             resolver.write_text(Path('/etc/resolv.conf').read_text())
             run('chroot', str(root), 'apt-get', 'update')
             run('chroot', str(root), 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y', '--no-install-recommends',
-                'ansible-core', 'network-manager', 'iw', 'rfkill', 'dnsmasq-base', 'nftables', 'openssh-server', 'sudo', 'python3', 'util-linux')
+                'ansible-core', 'network-manager', 'iproute2', 'iw', 'rfkill', 'dnsmasq-base', 'nftables', 'openssh-server', 'sudo', 'python3', 'util-linux')
             run('chroot', str(root), 'apt-get', 'clean')
             bundle = root / 'usr/lib/stitkovac-image'
             shutil.copytree(REPO / 'deploy/ansible', bundle / 'deploy/ansible')

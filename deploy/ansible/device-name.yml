@@ -1,0 +1,102 @@
+---
+# Run over printer-side Ethernet after stopping printing and the network helper.
+- name: Rename an initialized appliance from its permanent Wi-Fi MAC
+  hosts: gateways
+  become: true
+  gather_facts: false
+  vars:
+    ansible_remote_tmp: /tmp/ansible-gateway-service
+  tasks:
+    - name: Require explicit offline maintenance without a fixture MAC
+      ansible.builtin.assert:
+        that:
+          - gateway_name_maintenance | default(false) | bool
+          - gateway_naming_test_mac | default('') == ''
+          - not ansible_check_mode
+        fail_msg: Finish printing, stop the gateway agent and network helper, then run over printer-side Ethernet with gateway_name_maintenance=true.
+
+    - name: Require completed appliance initialization
+      ansible.builtin.command: test -f /data/gateway-image-ready
+      changed_when: false
+
+    - name: Require read-only appliance storage
+      ansible.builtin.command: /usr/lib/stitkovac-gateway/check-storage
+      changed_when: false
+
+    - name: Read service states
+      ansible.builtin.command:
+        argv: [systemctl, show, "{{ item }}", --property=ActiveState, --value]
+      loop: [stitkovac-gateway.service, stitkovac-gateway-network.service]
+      register: gateway_name_services
+      changed_when: false
+
+    - name: Require stopped services before editing their configuration
+      ansible.builtin.assert:
+        that: item.stdout | trim in ['inactive', 'failed']
+      loop: "{{ gateway_name_services.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect active NetworkManager profiles
+      ansible.builtin.command: nmcli -t -f NAME connection show --active
+      register: gateway_name_connections
+      changed_when: false
+
+    - name: Refuse renaming an active service access point
+      ansible.builtin.assert:
+        that: "'gateway-service-ap' not in gateway_name_connections.stdout_lines"
+
+    - name: Read existing private configuration
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop: [/etc/stitkovac-gateway/network.json, /data/network/ap-credentials.json]
+      register: gateway_name_private
+      no_log: true
+
+    - name: Use the installed Wi-Fi interface
+      ansible.builtin.set_fact:
+        gateway_wifi_interface: "{{ (gateway_name_private.results[0].content | b64decode | from_json).wifiInterface }}"
+      no_log: true
+
+    - name: Resolve the permanent device name before unlocking storage
+      ansible.builtin.import_tasks: tasks/read-device-name.yml
+
+    - name: Rename the appliance without replacing credentials
+      block:
+        - name: Temporarily unlock system configuration
+          ansible.builtin.command: mount -o remount,rw /
+          changed_when: true
+
+        - name: Apply the persistent hostname
+          ansible.builtin.import_tasks: tasks/apply-device-name.yml
+
+        - name: Replace only the SSID in retained configuration
+          ansible.builtin.copy:
+            dest: "{{ item.path }}"
+            content: "{{ (item.source | b64decode | from_json) | combine(item.change) | to_nice_json }}"
+            owner: root
+            group: root
+            mode: '0600'
+          loop:
+            - path: /etc/stitkovac-gateway/network.json
+              source: "{{ gateway_name_private.results[0].content }}"
+              change: {apSSID: "{{ gateway_device_name }}"}
+            - path: /data/network/ap-credentials.json
+              source: "{{ gateway_name_private.results[1].content }}"
+              change: {ssid: "{{ gateway_device_name }}"}
+          no_log: true
+
+        - name: Validate retained network configuration
+          ansible.builtin.command: /usr/lib/stitkovac-gateway/gateway-network --check
+          changed_when: false
+      always:
+        - name: Flush updated configuration
+          ansible.builtin.command: sync
+          changed_when: false
+        - name: Restore read-only root
+          ansible.builtin.command: mount -o remount,ro /
+          changed_when: true
+
+    - name: Report maintenance completion
+      ansible.builtin.debug:
+        msg: "Hostname and service SSID: {{ gateway_device_name }}. Restart the network helper and agent after maintenance. The new service SSID is applied on the next AP activation; uplink DHCP advertises the hostname on its next lease acquisition."

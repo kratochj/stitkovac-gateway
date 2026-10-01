@@ -1,0 +1,21 @@
+---
+- name: Set persistent and current appliance hostname
+  ansible.builtin.hostname:
+    name: "{{ gateway_device_name }}"
+    use: systemd
+
+- name: Resolve the local hostname without external DNS
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1(?:\s|$)'
+    line: "127.0.1.1\t{{ gateway_device_name }}"
+    create: true
+    mode: '0644'
+
+- name: Keep the device hostname independent of uplink DHCP
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/91-stitkovac-hostname.conf
+    mode: '0644'
+    content: |
+      [main]
+      hostname-mode=none

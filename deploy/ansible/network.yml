@@ -32,6 +32,9 @@
           - gateway_gpio_chip == '' or gateway_gpio_chip is match('^/dev/gpiochip[0-9]+$')
         fail_msg: Use the local console on a prepared RPi image and set gateway_network_provision=true.
 
+    - name: Resolve hardware-derived appliance name before making changes
+      ansible.builtin.import_tasks: tasks/read-device-name.yml
+
     - name: Validate IPv4 ranges and addresses before rendering system configuration
       ansible.builtin.command:
         argv:
@@ -99,7 +102,7 @@
 
     - name: Install the network stack
       ansible.builtin.apt:
-        name: [network-manager, iw, dnsmasq-base, nftables]
+        name: [network-manager, iproute2, iw, dnsmasq-base, nftables]
         state: present
         update_cache: true
 
@@ -226,6 +229,9 @@
           [ipv6]
           method=disabled
 
+    - name: Apply hardware-derived appliance hostname
+      ansible.builtin.import_tasks: tasks/apply-device-name.yml
+
     - name: Preserve existing unique service AP credentials
       ansible.builtin.stat:
         path: /data/network/ap-credentials.json
@@ -238,8 +244,8 @@
           - python3
           - -c
           - |
-            import json, os, secrets, uuid
-            data = {'ssid': 'Stitkovac-GW-' + secrets.token_hex(3), 'password': secrets.token_urlsafe(24), 'id': str(uuid.uuid4())}
+            import json, os, secrets, sys, uuid
+            data = {'ssid': sys.argv[1], 'password': secrets.token_urlsafe(24), 'id': str(uuid.uuid4())}
             path = '/data/network/ap-credentials.json'
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, 'w') as f:
@@ -249,12 +255,23 @@
             fd = os.open('/data/network', os.O_RDONLY)
             os.fsync(fd)
             os.close(fd)
+          - "{{ gateway_device_name }}"
       no_log: true
 
     - name: Read private service AP credentials
       ansible.builtin.slurp:
         src: /data/network/ap-credentials.json
       register: gateway_ap_secret
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: Align service SSID while preserving its password and UUID
+      ansible.builtin.copy:
+        dest: /data/network/ap-credentials.json
+        owner: root
+        group: root
+        mode: '0600'
+        content: "{{ (gateway_ap_secret.content | b64decode | from_json) | combine({'ssid': gateway_device_name}) | to_nice_json }}"
       no_log: true
       when: not ansible_check_mode
 
@@ -274,7 +291,7 @@
           printerInterface: "{{ gateway_printer_interface }}"
           printerCIDR: "{{ gateway_printer_address }}/{{ gateway_printer_prefix }}"
           apCIDR: "{{ gateway_ap_address }}/24"
-          apSSID: "{{ secret.ssid }}"
+          apSSID: "{{ gateway_device_name }}"
           apPassword: "{{ secret.password }}"
           apID: "{{ secret.id }}"
           country: "{{ gateway_country }}"

@@ -57,6 +57,9 @@ def mounted(image, function):
 def inspect_first_boot(root, work, expected_version):
     assert (root / 'data/gateway-image-ready').read_text().strip() == '1', 'First boot did not complete'
     assert (root / 'data/gateway/gateway.db').is_file()
+    assert (root / 'etc/hostname').read_text().strip() == 'stitkovac-gw-9a-e3'
+    assert json.loads((root / 'data/network/ap-credentials.json').read_text())['ssid'] == 'stitkovac-gw-9a-e3'
+    assert json.loads((root / 'etc/stitkovac-gateway/network.json').read_text())['apSSID'] == 'stitkovac-gw-9a-e3'
     assert not (root / 'data/gateway-bootstrap.json').exists()
     assert not (root / 'boot/firmware/gateway-provision.json').exists()
     selection = json.loads((root / 'data/gateway-releases/selection.json').read_text())
@@ -117,7 +120,10 @@ def main():
         # Only the disposable test DTB changes; real hardware retains the vendor DTB.
         build.run('fdtput', '-t', 's', str(args.work / 'bcm2710-rpi-3-b.dtb'),
                   '/soc/watchdog@7e100000', 'status', 'disabled')
-        # QEMU has no radio. Initial provisioning still validates the real OS and signed agent.
+        # QEMU has no radio; inject an explicit MAC only in the disposable copy.
+        inventory = root / 'usr/lib/stitkovac-image/inventory.yml'
+        inventory.write_text(inventory.read_text() + '      gateway_naming_test_mac: "b8:27:eb:e3:9a:e3"\n')
+        # Initial provisioning still validates the real OS and signed agent.
         (boot / 'gateway-provision.json').write_text(json.dumps({
             'admin_password': 'disposable-boot-smoke-only', 'country': 'CZ',
             'ssh_public_key': 'ssh-ed25519 ' + base64.b64encode(b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20' + bytes(range(32))).decode() + ' smoke',

@@ -145,3 +145,10 @@ aplikační OTA inicializuje automaticky z přibaleného podepsaného vydání p
 `deploy/ansible/ota.yml`. Image 0.1.8 používá dosavadní pilotní veřejný klíč
 `virtualbox-lab-20260929`; privátní klíč v image není. Bez této volby zůstává
 OTA vypnuté a vyžaduje samostatný servisní provisioning.
+
+## Pojmenování při dalším sestavení
+
+Nově sestavený image při prvním bootu nastaví hostname a servisní SSID podle
+posledních dvou bajtů trvalé Wi-Fi MAC, například `stitkovac-gw-9a-e3`.
+Podrobnosti a servisní přejmenování existujících zařízení:
+[pojmenování brány](device-naming.md). Dříve sestavený image 0.1.8 tato změna neupravuje.
